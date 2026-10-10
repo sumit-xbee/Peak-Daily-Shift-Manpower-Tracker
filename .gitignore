@@ -14,3 +14,4 @@ coverage/
 supabase/.temp/
 .vercel
 .env*
+supabase/*.local.sql
