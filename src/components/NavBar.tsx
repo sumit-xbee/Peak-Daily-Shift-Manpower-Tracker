@@ -29,18 +29,20 @@ export default function NavBar({ email, isAdmin }: { email: string; isAdmin: boo
 
   return (
     <nav className="nav" aria-label="Main">
-      <div className="wrap">
+      <div className="wrap navrow">
         <Link href="/dashboard" className="brandlink" aria-label="Xpressbees Peak Shift Tracker, home">
           <Logo height={30} />
           <span className="brand">Peak Shift Tracker</span>
         </Link>
-        {tabs.map((t) => (
-          <Link key={t.href} href={t.href} className="tab" aria-current={current === t.href ? "page" : undefined} onClick={() => setPending(t.href)}>
-            {t.label}
-          </Link>
-        ))}
+        <div className="tabs">
+          {tabs.map((t) => (
+            <Link key={t.href} href={t.href} className="tab" aria-current={current === t.href ? "page" : undefined} onClick={() => setPending(t.href)}>
+              {t.label}
+            </Link>
+          ))}
+        </div>
         <span className="who">
-          {email}
+          <span className="whoemail" title={email}>{email}</span>
           <LogoutButton />
         </span>
       </div>
