@@ -2,18 +2,20 @@ import { AdhocValue, ClassChip, StatusChip } from "@/components/Chip";
 import DashControls from "@/components/DashControls";
 import DivergingBars, { type BarRow } from "@/components/DivergingBars";
 import Shell from "@/components/Shell";
-import { loadDay, nextDay, pocNames, prevDay, sortViews, totals } from "@/lib/dashdata";
+import StatTile from "@/components/StatTile";
+import { loadCompare, loadDay, nextDay, pocNames, prevDay, sortViews, totals } from "@/lib/dashdata";
 import { fmtDateTime } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
 export default async function HubView({ searchParams }: { searchParams: Promise<{ date?: string; zone?: string }> }) {
   const sp = await searchParams;
-  const day = await loadDay(sp.date);
+  const [day, cmp] = await Promise.all([loadDay(sp.date), loadCompare(sp.date)]); // both at once
   const zones = [...day.master.zones.values()].map((z) => z.name).sort();
   const zone = sp.zone && zones.includes(sp.zone) ? sp.zone : "";
   const views = sortViews(day.views.filter((v) => !zone || v.shift.hub.zone.name === zone));
   const t = totals(views);
+  const p = cmp ? totals(cmp.views.filter((v) => !zone || v.shift.hub.zone.name === zone)) : null; // the same zone filter, for the day before
   const off = day.cfg.tzOff;
 
   // chart: the largest gaps first, entered rows only
@@ -38,15 +40,18 @@ export default async function HubView({ searchParams }: { searchParams: Promise<
       <DashControls path="/dashboard" date={day.date} today={day.today} zone={zone} zones={zones} prev={prevDay(day.date)} next={nextDay(day.date)} />
 
       <div className="tiles">
-        <Tile l="Shifts due" v={`${t.due}`} />
-        <Tile l="Entered" v={`${t.entered}/${t.due}`} />
-        <Tile l="Pending" v={`${t.pending}`} />
-        <Tile l="Missed" v={`${t.missed}`} />
-        <Tile l="LOW shifts" v={`${t.low}`} />
-        <Tile l="EXCESS shifts" v={`${t.excess}`} />
-        <Tile l="People needed (shortfalls)" v={`${t.shortOnly}`} />
-        <Tile l="People in excess" v={`${t.excessOnly}`} />
+        <StatTile label="Shifts due" value={t.due} prev={p?.due} good="neutral" vs={cmp?.label} />
+        <StatTile label="Entered" value={t.entered} of={t.due} prev={p?.entered} good="up" tone="good" vs={cmp?.label} hint={`${t.entered} of ${t.due} shifts have an entry`} />
+        <StatTile label="Pending" value={t.pending} prev={p?.pending} good="down" tone="warn" vs={cmp?.label} />
+        <StatTile label="Missed" value={t.missed} prev={p?.missed} good="down" tone="bad" vs={cmp?.label} />
+        <StatTile label="LOW shifts" value={t.low} prev={p?.low} good="down" tone="bad" vs={cmp?.label} />
+        <StatTile label="EXCESS shifts" value={t.excess} prev={p?.excess} good="down" tone="info" vs={cmp?.label} />
+        <StatTile label="People needed" value={t.shortOnly} prev={p?.shortOnly} good="down" tone="bad" vs={cmp?.label} hint="Sum of shortfalls: ad-hoc manpower needed" />
+        <StatTile label="People in excess" value={t.excessOnly} prev={p?.excessOnly} good="down" tone="info" vs={cmp?.label} hint="Sum of excess above plan" />
       </div>
+      <p className="small muted tilenote">
+        {cmp ? <>Brackets show the change {cmp.label}. <span className="d good">Green</span> = better, <span className="d bad">red</span> = worse.</> : "No data for the previous day yet, so there are no day-on-day changes to show."}
+      </p>
 
       <section className="card" aria-labelledby="chart-h">
         <h2 id="chart-h">Largest gaps {entered.length > 25 ? `(top 25 of ${entered.length})` : ""}</h2>
@@ -102,14 +107,5 @@ export default async function HubView({ searchParams }: { searchParams: Promise<
         )}
       </section>
     </Shell>
-  );
-}
-
-function Tile({ l, v }: { l: string; v: string }) {
-  return (
-    <div className="tile">
-      <div className="l">{l}</div>
-      <div className="v">{v}</div>
-    </div>
   );
 }

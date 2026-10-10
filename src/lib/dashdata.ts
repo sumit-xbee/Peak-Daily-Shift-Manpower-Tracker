@@ -1,7 +1,7 @@
 import { buildConfig, loadOverrides, loadRawConfig, type Config } from "./config";
 import { chunk, db } from "./db";
 import { loadMaster, type Master } from "./master";
-import { buildViews, loadEntrySummariesForDates, loadRoundsForDates, type RoundView } from "./rounds";
+import { buildViews, loadEntrySummariesForDates, loadRoundsForDates, type EntrySummary, type RoundView } from "./rounds";
 import { addDays, isDateStr, localDateStr } from "./time";
 
 export interface AlertState {
@@ -43,6 +43,44 @@ export async function loadDay(dateParam?: string): Promise<DayData> {
   ]);
   const views = buildViews(rounds, entries, master, cfg, raw, overrides, now);
   return { date, today, now, cfg, master, views, alerts };
+}
+
+export interface Comparison {
+  views: RoundView[];
+  /** shown under the cards, e.g. "vs yesterday at this time" */
+  label: string;
+}
+
+/** Drop entries that were first made after `asOf`, so a past day can be seen as it looked at that moment. */
+export function entriesAsOf(entries: Map<string, EntrySummary>, asOf: Date): Map<string, EntrySummary> {
+  const out = new Map<string, EntrySummary>();
+  for (const [id, e] of entries) if (new Date(e.first.created_at).getTime() <= asOf.getTime()) out.set(id, e);
+  return out;
+}
+
+/**
+ * The day before `dateParam`, for the day-on-day changes on the cards.
+ * Today is compared with yesterday AS OF THE SAME TIME OF DAY (otherwise a morning would always
+ * look terrible next to a finished day). Any other date is compared with the full previous day.
+ * Returns null when the previous day has no data (e.g. the first day the system ran).
+ */
+export async function loadCompare(dateParam?: string): Promise<Comparison | null> {
+  const now = new Date();
+  const raw = await loadRawConfig();
+  const cfg = buildConfig(raw);
+  const today = localDateStr(now, cfg.tzOff);
+  const date = pickDate(dateParam, today);
+  const prev = addDays(date, -1);
+  const isToday = date === today;
+  const asOf = isToday ? new Date(now.getTime() - 86400000) : now;
+
+  const [master, overrides, rounds, entries] = await Promise.all([loadMaster(), loadOverrides(), loadRoundsForDates([prev]), loadEntrySummariesForDates([prev])]);
+  if (!rounds.length) return null;
+  const visible = isToday ? entriesAsOf(entries, asOf) : entries;
+  return {
+    views: buildViews(rounds, visible, master, cfg, raw, overrides, asOf),
+    label: isToday ? "vs yesterday at this time" : "vs the day before",
+  };
 }
 
 /** Open alerts of the rounds on the given dates, in one query. */

@@ -2,15 +2,17 @@ import { ClassChip } from "@/components/Chip";
 import DashControls from "@/components/DashControls";
 import DivergingBars, { type BarRow } from "@/components/DivergingBars";
 import Shell from "@/components/Shell";
-import { loadDay, nextDay, prevDay, totals } from "@/lib/dashdata";
+import StatTile from "@/components/StatTile";
+import { loadCompare, loadDay, nextDay, prevDay, totals } from "@/lib/dashdata";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
 export default async function ZoneView({ searchParams }: { searchParams: Promise<{ date?: string }> }) {
   const sp = await searchParams;
-  const day = await loadDay(sp.date);
+  const [day, cmp] = await Promise.all([loadDay(sp.date), loadCompare(sp.date)]); // both at once
   const zones = [...day.master.zones.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const prevAll = cmp ? totals(cmp.views) : null;
 
   const rows = zones.map((z) => {
     const vs = day.views.filter((v) => v.shift.hub.zone.id === z.id);
@@ -34,11 +36,14 @@ export default async function ZoneView({ searchParams }: { searchParams: Promise
       <DashControls path="/dashboard/zones" date={day.date} today={day.today} prev={prevDay(day.date)} next={nextDay(day.date)} />
 
       <div className="tiles">
-        <div className="tile"><div className="l">Entered</div><div className="v">{all.entered}/{all.due}</div></div>
-        <div className="tile"><div className="l">People needed (shortfalls)</div><div className="v">{all.shortOnly}</div></div>
-        <div className="tile"><div className="l">People in excess</div><div className="v">{all.excessOnly}</div></div>
-        <div className="tile"><div className="l">Net ad-hoc needed</div><div className="v">{all.net}</div></div>
+        <StatTile label="Entered" value={all.entered} of={all.due} prev={prevAll?.entered} good="up" tone="good" vs={cmp?.label} hint={`${all.entered} of ${all.due} shifts have an entry`} />
+        <StatTile label="People needed" value={all.shortOnly} prev={prevAll?.shortOnly} good="down" tone="bad" vs={cmp?.label} hint="Sum of shortfalls: ad-hoc manpower needed" />
+        <StatTile label="People in excess" value={all.excessOnly} prev={prevAll?.excessOnly} good="down" tone="info" vs={cmp?.label} hint="Sum of excess above plan" />
+        <StatTile label="Net ad-hoc needed" value={all.net} prev={prevAll?.net} good="down" tone="warn" vs={cmp?.label} hint="Planned minus Actual, all zones" />
       </div>
+      <p className="small muted tilenote">
+        {cmp ? <>Brackets show the change {cmp.label}. <span className="d good">Green</span> = better, <span className="d bad">red</span> = worse.</> : "No data for the previous day yet, so there are no day-on-day changes to show."}
+      </p>
 
       <section className="card" aria-labelledby="zc">
         <h2 id="zc">Shortfall vs excess by zone</h2>
