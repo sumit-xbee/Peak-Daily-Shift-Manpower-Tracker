@@ -160,6 +160,10 @@ table.t td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-
 table.t td.r, table.t th.r { text-align: right; }
 table.t tbody tr:hover td { background: var(--hover); }
 table.t tbody tr:last-child td { border-bottom: 0; }
+table.t .nowrap, table.t .pocs div { white-space: nowrap; }
+table.t th.r { min-width: 84px; }
+table.t td { padding: 9px 10px; }
+table.t th { padding: 10px 10px; }
 .adhoc { font-weight: 700; font-variant-numeric: tabular-nums; }
 .adhoc.pos { color: var(--short); }
 .adhoc.neg { color: var(--excess); }

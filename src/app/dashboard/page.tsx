@@ -79,9 +79,9 @@ export default async function HubView({ searchParams }: { searchParams: Promise<
                   return (
                     <tr key={v.round.id}>
                       <td><strong>{v.shift.hub.name}</strong></td>
-                      <td>{v.shift.hub.zone.name}</td>
-                      <td className="num">{v.label}</td>
-                      <td className="small">{pocNames(v)}</td>
+                      <td className="nowrap">{v.shift.hub.zone.name}</td>
+                      <td className="num nowrap">{v.label}</td>
+                      <td className="small pocs">{pocNames(v).split(" / ").map((n) => <div key={n}>{n}</div>)}</td>
                       <td className="r num">{e ? e.planned : "–"}</td>
                       <td className="r num">{e ? e.actual : "–"}</td>
                       <td className="r"><AdhocValue value={e ? e.adhoc_needed : null} /></td>
