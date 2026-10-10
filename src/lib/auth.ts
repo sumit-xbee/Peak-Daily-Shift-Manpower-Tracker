@@ -10,14 +10,15 @@ export async function requireSession(): Promise<Session> {
   return s;
 }
 
-/** Is this person a SYSTEM_ADMIN right now? One database query. */
+/** Is this person a SYSTEM_ADMIN right now? One database query. A database error is thrown, not read as "no". */
 export async function isAdminEmail(email: string): Promise<boolean> {
-  const { data } = await db()
+  const { data, error } = await db()
     .from("global_contacts")
     .select("id, people!inner(email)")
     .eq("role", "SYSTEM_ADMIN")
     .eq("people.email", email.trim().toLowerCase())
     .limit(1);
+  if (error) throw new Error(`admin check: ${error.message}`);
   return (data?.length ?? 0) > 0;
 }
 
@@ -42,17 +43,24 @@ export interface LinkInfo {
 
 export type LinkLookup = { ok: true; link: LinkInfo } | { ok: false; reason: "invalid" | "expired" };
 
-/** Look up a raw token from a URL. Only the hash is ever stored or compared. */
-export async function resolveLink(raw: string, kinds: LinkInfo["kind"][]): Promise<LinkLookup> {
-  if (!raw || raw.length < 30 || raw.length > 100) return { ok: false, reason: "invalid" };
-  const { data } = await db()
+/** Look up a raw token from a URL. Only the hash is ever stored or compared. A database error is thrown, not shown as "invalid link". */
+export async function resolveLink(raw: unknown, kinds: LinkInfo["kind"][]): Promise<LinkLookup> {
+  if (typeof raw !== "string" || raw.length < 30 || raw.length > 100) return { ok: false, reason: "invalid" };
+  const { data, error } = await db()
     .from("link_tokens")
-    .select("id,kind,person_id,round_ids,alert_id,expires_at,revoked")
+    .select("id,kind,person_id,round_ids,alert_id,expires_at,revoked,parent_token_id")
     .eq("token_hash", hashToken(raw))
     .maybeSingle();
+  if (error) throw new Error(`link lookup: ${error.message}`);
   if (!data || data.revoked || !kinds.includes(data.kind)) return { ok: false, reason: "invalid" };
   const expiresAt = new Date(data.expires_at);
   if (expiresAt.getTime() < Date.now()) return { ok: false, reason: "expired" };
+  // a delegate link is only as good as the link it was made from
+  if (data.kind === "delegate" && data.parent_token_id) {
+    const parent = await db().from("link_tokens").select("revoked,expires_at").eq("id", data.parent_token_id).maybeSingle();
+    if (parent.error) throw new Error(`link lookup: ${parent.error.message}`);
+    if (!parent.data || parent.data.revoked) return { ok: false, reason: "invalid" };
+  }
   return { ok: true, link: { id: data.id, kind: data.kind, personId: data.person_id, roundIds: data.round_ids, alertId: data.alert_id, expiresAt } };
 }
 
@@ -69,3 +77,5 @@ export function bearerMatches(header: string | null, secret: string | undefined)
   const want = hashToken(secret);
   return given === want;
 }
+
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

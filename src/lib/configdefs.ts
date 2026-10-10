@@ -48,20 +48,95 @@ export const CONFIG_DEFS: ConfigDef[] = [
   { group: "Other", key: "allowed_email_domains", label: "Allowed email domains", type: "list", help: "Comma separated, e.g. xpressbees.com, xpressbees.in" },
   { group: "Other", key: "placeholder_emails", label: "Placeholder POC emails", type: "list", help: "People who are only standing in; flagged in the POC Directory." },
   { group: "Other", key: "sanity_max_headcount", label: "Largest number accepted", type: "int" },
+  { group: "Other", key: "login_known_people_only", label: "Dashboard login only for people in the master data", type: "bool", help: "ON: only POCs, Zone RM/HR, Ops head and admins can log in. OFF (current): any XB email can." },
 ];
 
 export const OVERRIDE_KEYS = CONFIG_DEFS.filter((d) => d.perHub).map((d) => d.key);
 
-export function parseValue(def: ConfigDef, text: string): { ok: true; value: unknown } | { ok: false; error: string } {
+/** Defaults for settings that may not exist in an older database yet (the app treats a missing setting as its default). */
+export const CONFIG_DEFAULTS: Record<string, unknown> = {
+  login_known_people_only: false,
+  poc3_report_enabled: true,
+  poc3_report_time_ist: "06:00",
+};
+
+// ---------------------------------------------------------------- validation (used by the form AND the server)
+const ROLES = ["POC1", "POC2", "POC3", "ZONE_HR", "ZONE_RM", "OPS_HEAD", "SYSTEM_ADMIN"];
+const RANGES: Record<string, [number, number]> = {
+  low_pct: [1, 100], excess_pct: [1, 1000], low_threshold: [1, 100000], excess_threshold: [1, 100000],
+  round_open_offset_min: [0, 1440], reminder_offset_min: [1, 1440], l3_escalation_offset_min: [1, 1440],
+  zone_rm_ops_escalation_offset_min: [1, 1440], cutoff_offset_min: [10, 2880], ack_window_min: [1, 1440],
+  token_ttl_hours_after_cutoff: [1, 720], daily_send_cap: [1, 100000], cap_warn_pct: [1, 100], sanity_max_headcount: [10, 100000],
+};
+const EMAIL_RE = /^[a-z0-9._%+-]{1,64}@[a-z0-9.-]{1,190}$/;
+const DOMAIN_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/;
+const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * Check a setting before it is saved. Only settings listed in CONFIG_DEFS can be written at all,
+ * and per-hub overrides only for settings marked per-hub. Returns an error message, or null if fine.
+ */
+export function validateConfigValue(key: string, value: unknown, opts: { hub?: boolean; allowedDomains?: string[] } = {}): string | null {
+  const def = CONFIG_DEFS.find((d) => d.key === key);
+  if (!def) return "Unknown setting.";
+  if (opts.hub && !def.perHub) return "This setting cannot be set per hub.";
   switch (def.type) {
-    case "bool": return { ok: true, value: text === "true" };
+    case "bool":
+      return typeof value === "boolean" ? null : "Choose Yes or No.";
     case "int": {
-      if (!/^\d{1,6}$/.test(text.trim())) return { ok: false, error: "Enter a whole number." };
-      return { ok: true, value: Number(text.trim()) };
+      if (typeof value !== "number" || !Number.isInteger(value)) return "Enter a whole number.";
+      const [lo, hi] = RANGES[key] ?? [0, 1_000_000];
+      return value >= lo && value <= hi ? null : `Enter a number from ${lo} to ${hi}.`;
     }
-    case "list": return { ok: true, value: text.split(",").map((s) => s.trim()).filter(Boolean) };
-    default: return { ok: true, value: text.trim() };
+    case "select":
+      return typeof value === "string" && def.options?.includes(value) ? null : "Choose one of the listed options.";
+    case "list": {
+      if (!Array.isArray(value) || value.length > 20 || value.some((v) => typeof v !== "string" || v.length > 100 || !v.trim())) return "Enter up to 20 comma-separated values.";
+      const items = value as string[];
+      if (["first_email_to", "alert_recipients_low", "alert_recipients_excess"].includes(key)) {
+        const bad = items.find((v) => !ROLES.includes(v));
+        if (bad) return `"${bad}" is not a valid role. Use: ${ROLES.join(", ")}.`;
+        if (key === "first_email_to" && items.length === 0) return "At least one person must get the first email.";
+      }
+      if (key === "allowed_email_domains") {
+        if (items.length === 0) return "At least one email domain is required.";
+        const bad = items.find((v) => !DOMAIN_RE.test(v.toLowerCase()));
+        if (bad) return `"${bad}" is not a domain like xpressbees.com (no @ sign).`;
+      }
+      if (key === "placeholder_emails") {
+        const bad = items.find((v) => !EMAIL_RE.test(v.toLowerCase()));
+        if (bad) return `"${bad}" is not an email address.`;
+      }
+      return null;
+    }
+    default: {
+      if (typeof value !== "string" || value.length > 200) return "Text is too long.";
+      if (key === "digest_time_ist" || key === "poc3_report_time_ist") return HHMM_RE.test(value) ? null : "Use 24-hour time like 07:00.";
+      if (key === "sender_display_name") return value.trim().length >= 1 && value.length <= 80 && !/[\r\n<>"]/.test(value) ? null : "Use 1-80 characters, no quotes or line breaks.";
+      if (key === "reply_to" || key === "dry_run_to") {
+        if (value === "") return key === "reply_to" ? null : "A dry-run address is required while dry run is on.";
+        const e = value.trim().toLowerCase();
+        if (!EMAIL_RE.test(e)) return "Enter a valid email address.";
+        if (opts.allowedDomains && !opts.allowedDomains.includes(e.split("@")[1])) return "Use an address on an allowed XB domain.";
+      }
+      return null;
+    }
   }
+}
+
+export function parseValue(def: ConfigDef, text: string): { ok: true; value: unknown } | { ok: false; error: string } {
+  let value: unknown;
+  switch (def.type) {
+    case "bool": value = text === "true"; break;
+    case "int":
+      if (!/^\d{1,7}$/.test(text.trim())) return { ok: false, error: "Enter a whole number." };
+      value = Number(text.trim());
+      break;
+    case "list": value = text.split(",").map((s) => s.trim()).filter(Boolean); break;
+    default: value = text.trim();
+  }
+  const err = validateConfigValue(def.key, value);
+  return err ? { ok: false, error: err } : { ok: true, value };
 }
 
 export function showValue(def: ConfigDef, v: unknown): string {

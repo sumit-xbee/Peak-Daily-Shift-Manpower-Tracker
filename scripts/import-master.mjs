@@ -2,7 +2,10 @@
 //   npm run import:master                      (reads templates/master_data_template.xlsx)
 //   npm run import:master -- path/to/file.xlsx
 //   npm run import:master -- --prune           (also switch off shifts that are no longer in the sheet)
-//   npm run import:master -- --check           (validate only, change nothing)
+//   npm run import:master -- --check           (validate only, change nothing; also shows how the sheet differs from the live database)
+//   npm run import:master -- --update-existing (ALSO overwrite POCs, zones, active flags and names of things that already exist.
+//                                               Without it, only NEW zones, hubs, shifts and people are added, so edits made in the
+//                                               app's POC directory are never undone by a re-run with an old Excel.)
 // Needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local. Run it on your own computer:
 // the Excel holds employee emails, so it is kept out of Git on purpose.
 import { createClient } from "@supabase/supabase-js";
@@ -118,19 +121,9 @@ if (errors.length) {
   console.error(`\n${errors.length} problem(s) found. Nothing was changed:\n - ` + errors.join("\n - "));
   process.exit(1);
 }
-if (checkOnly) {
-  console.log("Check passed. Nothing was changed (--check).");
-  process.exit(0);
-}
-
-// ---- write
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-if (!url || !key) {
-  console.error("Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local first.");
-  process.exit(1);
-}
-const db = createClient(url, key, { auth: { persistSession: false } });
+const db = url && key ? createClient(url, key, { auth: { persistSession: false } }) : null;
 const must = (res, what) => {
   if (res.error) {
     console.error(`${what}: ${res.error.message}`);
@@ -139,29 +132,61 @@ const must = (res, what) => {
   return res.data;
 };
 
-// people: insert new, update names of existing
+// ---- what would change in the live database? (read-only)
+if (db) {
+  const peopleDb = must(await db.from("people").select("id,email"), "read people");
+  const emailById = new Map(peopleDb.map((p) => [p.id, p.email.toLowerCase()]));
+  const zonesDb = must(await db.from("zones").select("name,rm_person_id,hr_person_id"), "read zones");
+  const hubsDb = must(await db.from("hubs").select("name,active,poc1_id,poc2_id,poc3_id"), "read hubs");
+  const zoneDbNames = new Set(zonesDb.map((z) => z.name));
+  const hubDbByName = new Map(hubsDb.map((h) => [h.name, h]));
+  const newHubs = hubs.filter((h) => !hubDbByName.has(h.name));
+  const differ = hubs.filter((h) => {
+    const d = hubDbByName.get(h.name);
+    return d && (emailById.get(d.poc1_id) !== h.pocs[0] || emailById.get(d.poc2_id) !== h.pocs[1] || emailById.get(d.poc3_id) !== h.pocs[2] || d.active !== h.active);
+  });
+  const missingFromSheet = hubsDb.filter((d) => !hubNames.has(d.name));
+  console.log(`\nCompared with the live database: ${newHubs.length} new hub(s), ${zones.filter((z) => !zoneDbNames.has(z.name)).length} new zone(s), ` +
+    `${differ.length} existing hub(s) whose POCs/active flag differ from the sheet, ${missingFromSheet.length} hub(s) in the database but not in the sheet.`);
+  if (differ.length) console.log(`  Differing hubs: ${differ.slice(0, 12).map((h) => h.name).join(", ")}${differ.length > 12 ? ", ..." : ""}`);
+  if (missingFromSheet.length) console.log(`  Not in the sheet (left untouched): ${missingFromSheet.map((h) => h.name).join(", ")}`);
+  if (differ.length && !args.includes("--update-existing")) {
+    console.log("  Existing hubs are NOT changed unless you add --update-existing (POC edits made in the app are protected).");
+  }
+}
+if (checkOnly) {
+  console.log("\nCheck passed. Nothing was changed (--check).");
+  process.exit(0);
+}
+
+// ---- write
+if (!db) {
+  console.error("Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local first.");
+  process.exit(1);
+}
+const updateExisting = args.includes("--update-existing");
+
+// people: insert new ones; names of existing people change only with --update-existing
 const existing = must(await db.from("people").select("id,email,name"), "read people");
 const idByEmail = new Map(existing.map((p) => [p.email.toLowerCase(), p.id]));
 const nameByEmail = new Map(existing.map((p) => [p.email.toLowerCase(), p.name]));
 const fresh = [];
 for (const [email, name] of people) {
   if (!idByEmail.has(email)) fresh.push({ email, name });
-  else if (nameByEmail.get(email) !== name) must(await db.from("people").update({ name }).eq("id", idByEmail.get(email)), "update person");
+  else if (updateExisting && nameByEmail.get(email) !== name) must(await db.from("people").update({ name }).eq("id", idByEmail.get(email)), "update person");
 }
 if (fresh.length) for (const p of must(await db.from("people").insert(fresh).select("id,email"), "insert people")) idByEmail.set(p.email.toLowerCase(), p.id);
 
-must(await db.from("zones").upsert(zones.map((z) => ({ name: z.name, rm_person_id: idByEmail.get(z.rm), hr_person_id: idByEmail.get(z.hr) })), { onConflict: "name" }), "upsert zones");
+// zones and hubs: new ones are added; existing ones are left as they are in the app unless --update-existing
+const zoneRows = zones.map((z) => ({ name: z.name, rm_person_id: idByEmail.get(z.rm), hr_person_id: idByEmail.get(z.hr) }));
+must(await db.from("zones").upsert(zoneRows, { onConflict: "name", ignoreDuplicates: !updateExisting }), "save zones");
 const zoneId = new Map(must(await db.from("zones").select("id,name"), "read zones").map((z) => [z.name, z.id]));
 
-must(
-  await db.from("hubs").upsert(
-    hubs.map((h) => ({ name: h.name, zone_id: zoneId.get(h.zone), poc1_id: idByEmail.get(h.pocs[0]), poc2_id: idByEmail.get(h.pocs[1]), poc3_id: idByEmail.get(h.pocs[2]), active: h.active })),
-    { onConflict: "name" },
-  ),
-  "upsert hubs",
-);
+const hubRows = hubs.map((h) => ({ name: h.name, zone_id: zoneId.get(h.zone), poc1_id: idByEmail.get(h.pocs[0]), poc2_id: idByEmail.get(h.pocs[1]), poc3_id: idByEmail.get(h.pocs[2]), active: h.active }));
+must(await db.from("hubs").upsert(hubRows, { onConflict: "name", ignoreDuplicates: !updateExisting }), "save hubs");
 const hubId = new Map(must(await db.from("hubs").select("id,name"), "read hubs").map((h) => [h.name, h.id]));
 
+// shifts: only missing ones are added. A shift that was switched off in the app is NOT switched back on here.
 const seen = new Set();
 const shiftRows = [];
 for (const s of shifts) {
@@ -170,7 +195,7 @@ for (const s of shifts) {
   seen.add(k);
   shiftRows.push({ hub_id: hubId.get(s.hub), start_time: s.start, end_time: s.end, active: true });
 }
-must(await db.from("hub_shifts").upsert(shiftRows, { onConflict: "hub_id,start_time,end_time" }), "upsert shifts");
+must(await db.from("hub_shifts").upsert(shiftRows, { onConflict: "hub_id,start_time,end_time", ignoreDuplicates: true }), "add shifts");
 if (prune) {
   const all = must(await db.from("hub_shifts").select("id,hub_id,start_time,end_time,active"), "read shifts");
   const idToHub = new Map([...hubId].map(([n, id]) => [id, n]));

@@ -9,14 +9,15 @@
   --muted: #667085;
   --line: #e4e7ec;
   --axis: #d0d5dd;
+  --input-border: #858d9d; /* 3:1 against white, so the number boxes are easy to see */
   --btn: #1c5cab;
   --btn-ink: #ffffff;
   --brand: #f58220; /* Xpressbees orange: accents only */
   --brand-bg: #fff3e6;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.04);
-  --short: #d03b3b; /* LOW manpower (critical) */
+  --short: #c0302b; /* LOW manpower (critical): 4.9:1 on its tint */
   --short-bg: #fdecea;
-  --excess: #2a78d6; /* EXCESS buffer */
+  --excess: #1d5fb8; /* EXCESS buffer: 5.4:1 on its tint */
   --excess-bg: #e8f1fc;
   --ok: #067647;
   --ok-bg: #e7f6ec;
@@ -40,6 +41,7 @@
     --muted: #a0a6b2;
     --line: #2a2d34;
     --axis: #3a3e47;
+    --input-border: #6b7280;
     --btn: #3987e5;
     --btn-ink: #0b0b0b;
     --brand: #ff9a3d;
@@ -115,11 +117,13 @@ h1 + p.muted { margin-bottom: 18px; }
 label { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink2); margin-bottom: 4px; }
 input[type="text"], input[type="email"], input[type="number"], input[type="date"], input[type="search"], select, textarea {
   width: 100%; font: inherit; color: var(--ink); background: var(--surface);
-  border: 1px solid var(--axis); border-radius: 10px; padding: 9px 12px; min-height: 42px;
+  border: 1px solid var(--input-border); border-radius: 10px; padding: 9px 12px; min-height: 42px;
   transition: border-color .12s, box-shadow .12s;
 }
+input:disabled, select:disabled { opacity: .65; cursor: not-allowed; }
 input:hover, select:hover, textarea:hover { border-color: var(--neutral); }
-input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent); }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid transparent; border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent); }
+@media (forced-colors: active) { input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid Highlight; } }
 button:focus-visible, a:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .btn {
   font: inherit; font-weight: 600; cursor: pointer; border: 0; border-radius: 10px;
@@ -131,6 +135,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--focus); outline
 .btn.secondary { background: var(--surface); color: var(--ink); border: 1px solid var(--axis); font-weight: 600; box-shadow: none; }
 .btn.secondary:hover:not([disabled]) { background: var(--neutral-bg); filter: none; }
 .btn.small { padding: 5px 12px; min-height: 34px; font-size: 13px; border-radius: 8px; }
+@media (pointer: coarse) { .btn.small { min-height: 40px; } }
 .btn[disabled] { opacity: .5; cursor: not-allowed; box-shadow: none; }
 .field { min-width: 0; }
 @media (pointer: coarse) { input[type="text"], input[type="email"], input[type="date"], input[type="search"], select, .btn { min-height: 46px; } }
@@ -195,7 +200,7 @@ table.t th { padding: 10px 10px; }
 
 /* chart */
 .chart { width: 100%; overflow-x: auto; }
-.chart svg { display: block; width: 100%; height: auto; }
+.chart svg { display: block; width: 100%; min-width: 560px; height: auto; } /* on a phone the chart scrolls sideways instead of shrinking the text to nothing */
 .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink2); margin: 6px 0 10px; }
 .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
 .tip { position: fixed; z-index: 20; pointer-events: none; background: var(--ink); color: var(--bg); padding: 8px 10px; border-radius: 8px; font-size: 13px; max-width: 280px; box-shadow: 0 4px 16px rgba(0,0,0,.25); }

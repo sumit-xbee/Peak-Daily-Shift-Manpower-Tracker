@@ -43,7 +43,8 @@ export default async function MissingPage({ searchParams }: { searchParams: Prom
             {missing.length} shift(s) missing, {missing.filter((v) => v.status === "MISSED").length} past cut-off.{" "}
             <StatusChip status="MISSED" /> and <StatusChip status="OVERDUE" /> are listed first.
           </p>
-          <MissingRows rows={rows} reasons={REASONS} />
+          {/* the key makes a different day or zone start a fresh list instead of reusing the old rows' state */}
+          <MissingRows key={`${day.date}|${zone}`} rows={rows} reasons={REASONS} />
         </>
       )}
     </Shell>

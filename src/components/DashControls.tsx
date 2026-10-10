@@ -6,7 +6,7 @@ export default function DashControls({
 }: { path: string; date: string; today: string; zone?: string; zones?: string[]; prev: string; next: string }) {
   const qs = (d: string) => `${path}?date=${d}${zone ? `&zone=${encodeURIComponent(zone)}` : ""}`;
   return (
-    <form method="get" action={path} className="row" style={{ marginBottom: 16 }}>
+    <form key={`${date}|${zone ?? ""}`} method="get" action={path} className="row" style={{ marginBottom: 16 }}>
       <div className="row" style={{ gap: 6 }}>
         <Link className="btn secondary small" href={qs(prev)} aria-label="Previous day">←</Link>
         <input type="date" name="date" defaultValue={date} aria-label="Date" style={{ width: 170 }} />

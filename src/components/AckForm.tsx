@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { postJson } from "@/lib/client";
 
 export default function AckForm({ token, allowedDomains }: { token: string; allowedDomains: string[] }) {
   const [email, setEmail] = useState("");
@@ -19,15 +20,15 @@ export default function AckForm({ token, allowedDomains }: { token: string; allo
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setBusy(true);
     setErr(null);
-    const r = await fetch("/api/ack", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token, email, eta, note }) });
-    const j = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    const res = await postJson("/api/ack", { token, email, eta, note });
     setBusy(false);
-    if (j.ok) {
+    if (res.ok) {
       try { localStorage.setItem("pst_email", email.trim().toLowerCase()); } catch { /* ignore */ }
       setDone(true);
-    } else setErr(j.error ?? "Could not save.");
+    } else setErr(res.error);
   }
 
   if (done) return <div className="msg ok" role="status">✓ Acknowledged. Thank you. The Ops head and Zone RM can see this on the dashboard.</div>;

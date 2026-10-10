@@ -1,7 +1,7 @@
 import { applyAlert } from "./alerts";
 import { classify, gapPercent, type ManpowerClass } from "./classify";
 import { configForHub, isAllowedEmail, loadConfig, loadOverrides, loadRawConfig, buildConfig } from "./config";
-import { db, must } from "./db";
+import { db, must, mustOk } from "./db";
 import { loadMaster } from "./master";
 import { loadRoundsByIds, loadEntrySummaries } from "./rounds";
 import { shiftLabel } from "./time";
@@ -38,8 +38,11 @@ export interface SavedItem {
 
 export type SubmitResult =
   | { ok: true; saved: SavedItem[] }
-  | { ok: false; error: string; needsConfirm?: false }
-  | { ok: false; needsConfirm: true; warnings: string[]; error?: undefined };
+  | { ok: false; error: string; needsConfirm?: false; status?: number }
+  | { ok: false; needsConfirm: true; warnings: string[]; error?: undefined; status?: undefined };
+
+/** One shift can be saved this many times an hour. Plenty for corrections; stops a script flooding HR with alerts. */
+const MAX_SAVES_PER_ROUND_PER_HOUR = 20;
 
 export const REASONS = ["Absenteeism", "Vendor no-show", "Late arrival", "Transport issue", "Higher volume than planned", "Other"];
 
@@ -67,9 +70,18 @@ export async function submitEntries(inp: SubmitInput): Promise<SubmitResult> {
   if (ids.length !== inp.items.length) return { ok: false, error: "A shift appears twice in this save." };
   if (inp.allowedRoundIds && ids.some((id) => !inp.allowedRoundIds!.includes(id))) return { ok: false, error: "This link does not cover one of those shifts." };
 
-  const rounds = await loadRoundsByIds(ids);
+  const hourAgo = new Date(now.getTime() - 3600_000).toISOString();
+  const [rounds, summaries, recent] = await Promise.all([
+    loadRoundsByIds(ids),
+    loadEntrySummaries(ids),
+    db().from("entries").select("round_id").in("round_id", ids).gte("created_at", hourAgo),
+  ]);
   if (rounds.length !== ids.length) return { ok: false, error: "Unknown shift." };
-  const summaries = await loadEntrySummaries(ids);
+  const perRound = new Map<string, number>();
+  for (const r of must(recent, "count recent saves") as { round_id: string }[]) perRound.set(r.round_id, (perRound.get(r.round_id) ?? 0) + 1);
+  if ([...perRound.values()].some((n) => n >= MAX_SAVES_PER_ROUND_PER_HOUR)) {
+    return { ok: false, error: "This shift has been changed many times in the last hour. Please wait a little before saving again.", status: 429 };
+  }
 
   const prepared: {
     round: (typeof rounds)[number]; planned: number; actual: number; reason: string | null;
@@ -101,7 +113,8 @@ export async function submitEntries(inp: SubmitInput): Promise<SubmitResult> {
 
     prepared.push({
       round, planned, actual, hubName: shift.hub.name, label: shiftLabel(shift.start, shift.end),
-      reason: typeof it.reason === "string" && REASONS.includes(it.reason) ? it.reason : null,
+      // a reason only makes sense for a shift that is LOW or EXCESS
+      reason: cls !== "OK" && typeof it.reason === "string" && REASONS.includes(it.reason) ? it.reason : null,
       cutoffAt: new Date(round.cutoff_at), hubCfg, hubId: shift.hub.id,
       prevPlanned: prev ? prev.planned : null,
       same: Boolean(prev && prev.planned === planned && prev.actual === actual),
@@ -110,26 +123,38 @@ export async function submitEntries(inp: SubmitInput): Promise<SubmitResult> {
 
   if (warnings.length && !inp.confirm) return { ok: false, needsConfirm: true, warnings };
 
-  const saved: SavedItem[] = [];
-  for (const p of prepared) {
-    if (!p.same) {
-      must(
-        await db().from("entries").insert({
-          round_id: p.round.id, planned: p.planned, actual: p.actual, entered_by_email: email, source: inp.source,
-          token_id: inp.tokenId ?? null, reason_code: p.reason, is_late: now.getTime() > p.cutoffAt.getTime(),
-          plan_changed: p.prevPlanned !== null && p.prevPlanned !== p.planned,
-          ip: inp.ip ?? null, user_agent: (inp.userAgent ?? "").slice(0, 300) || null,
-        }),
-        "save entry",
-      );
-    }
-    const shift = master.shifts.get(p.round.hub_shift_id)!;
-    const cls = await applyAlert({
-      cfg: p.hubCfg, master, hub: shift.hub, roundId: p.round.id, label: p.label, cutoffAt: p.cutoffAt,
-      planned: p.planned, actual: p.actual, enteredBy: email, enteredAt: now,
-    });
-    saved.push({ roundId: p.round.id, hub: p.hubName, label: p.label, planned: p.planned, actual: p.actual, adhoc: p.planned - p.actual, cls, unchanged: p.same });
-  }
+  // each shift is independent, so they are saved side by side (a POC saving 8 shifts should not wait for 8 in a row)
+  const saved = await Promise.all(
+    prepared.map(async (p): Promise<SavedItem> => {
+      if (!p.same) {
+        mustOk(
+          await db().from("entries").insert({
+            round_id: p.round.id, planned: p.planned, actual: p.actual, entered_by_email: email, source: inp.source,
+            token_id: inp.tokenId ?? null, reason_code: p.reason, is_late: now.getTime() > p.cutoffAt.getTime(),
+            plan_changed: p.prevPlanned !== null && p.prevPlanned !== p.planned,
+            ip: inp.ip ?? null, user_agent: (inp.userAgent ?? "").slice(0, 300) || null,
+          }),
+          "save entry",
+        );
+      }
+      // The alert follows the LATEST entry of the round, not just this request: if two people save at the same
+      // moment, the alert must end up matching whatever was saved last.
+      const latest = (
+        must(await db().from("entries").select("planned,actual,entered_by_email,created_at").eq("round_id", p.round.id).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1), "read latest entry") as
+          { planned: number; actual: number; entered_by_email: string; created_at: string }[]
+      )[0];
+      const shift = master.shifts.get(p.round.hub_shift_id)!;
+      await applyAlert({
+        cfg: p.hubCfg, master, hub: shift.hub, roundId: p.round.id, label: p.label, cutoffAt: p.cutoffAt,
+        planned: latest?.planned ?? p.planned, actual: latest?.actual ?? p.actual,
+        enteredBy: latest?.entered_by_email ?? email, enteredAt: latest ? new Date(latest.created_at) : now,
+      });
+      return {
+        roundId: p.round.id, hub: p.hubName, label: p.label, planned: p.planned, actual: p.actual, adhoc: p.planned - p.actual,
+        cls: classify(p.planned, p.actual, p.hubCfg.thresholds), unchanged: p.same,
+      };
+    }),
+  );
   return { ok: true, saved };
 }
 

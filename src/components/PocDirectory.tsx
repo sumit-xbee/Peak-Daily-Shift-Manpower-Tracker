@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
+import { postJson } from "@/lib/client";
 
 export interface P { name: string; email: string }
 export interface HubRow { id: string; name: string; zoneId: string; zone: string; active: boolean; shifts: number; pocs: [P, P, P] }
@@ -9,24 +10,25 @@ export interface GlobalRow { role: "OPS_HEAD" | "SYSTEM_ADMIN"; name: string; em
 export interface ChangeRow { at: string; actor: string; text: string }
 
 async function post(body: unknown) {
-  const r = await fetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  return (await r.json().catch(() => ({ ok: false, error: "Failed." }))) as { ok: boolean; error?: string; message?: string };
+  const res = await postJson<{ ok?: boolean; error?: string; message?: string }>("/api/admin", body);
+  return { ok: res.ok, error: res.error ?? undefined, message: res.data?.message };
 }
 
 const blank = (): P => ({ name: "", email: "" });
 const csv = (v: string) => `"${v.replace(/"/g, '""')}"`;
 
 function PairInputs({ label, v, onChange }: { label: string; v: P; onChange: (p: P) => void }) {
+  const id = useId();
   return (
     <div className="row" style={{ gap: 8, alignItems: "flex-end" }}>
       <div className="field" style={{ width: 70, paddingBottom: 12 }}><strong>{label}</strong></div>
       <div className="field" style={{ minWidth: 150, flex: 1 }}>
-        <label>Name</label>
-        <input type="text" value={v.name} onChange={(e) => onChange({ ...v, name: e.target.value })} />
+        <label htmlFor={`${id}-n`}>{label} name</label>
+        <input id={`${id}-n`} type="text" value={v.name} onChange={(e) => onChange({ ...v, name: e.target.value })} />
       </div>
       <div className="field" style={{ minWidth: 220, flex: 1 }}>
-        <label>XB email</label>
-        <input type="email" value={v.email} onChange={(e) => onChange({ ...v, email: e.target.value })} />
+        <label htmlFor={`${id}-e`}>{label} XB email</label>
+        <input id={`${id}-e`} type="email" value={v.email} onChange={(e) => onChange({ ...v, email: e.target.value })} />
       </div>
     </div>
   );
@@ -76,19 +78,41 @@ export default function PocDirectory({ hubs, zones, globals, placeholders, chang
   });
   const phCount = hubs.filter((h) => h.pocs.some((p) => isPh(p.email))).length;
 
+  // Ticked hubs that a filter has hidden are un-ticked, so "Assign to N hubs" never acts on rows nobody can see.
+  useEffect(() => {
+    const visible = new Set(hubs.filter((h) => {
+      if (zoneF && h.zone !== zoneF) return false;
+      if (phOnly && !h.pocs.some((p) => placeholders.includes(p.email.toLowerCase()))) return false;
+      if (q) {
+        const s = q.toLowerCase();
+        return h.name.toLowerCase().includes(s) || h.pocs.some((p) => p.name.toLowerCase().includes(s) || p.email.toLowerCase().includes(s));
+      }
+      return true;
+    }).map((h) => h.id));
+    setSel((prev) => {
+      const keep = new Set([...prev].filter((id) => visible.has(id)));
+      return keep.size === prev.size ? prev : keep;
+    });
+  }, [q, zoneF, phOnly, hubs, placeholders]);
+
   async function run(body: unknown, after?: () => void) {
     setBusy(true);
     setMsg(null);
     const r = await post(body);
     setBusy(false);
+    const multi = ["replacePerson", "bulkAssign"].includes((body as { action?: string }).action ?? "");
     if (r.ok) {
       setMsg({ kind: "ok", text: r.message ?? "Saved." });
       after?.();
       setTimeout(() => window.location.reload(), 900);
-    } else setMsg({ kind: "err", text: r.error ?? "Failed." });
+    } else {
+      setMsg({ kind: "err", text: multi ? `${r.error ?? "Failed."} Some hubs may have changed, so this page is reloading to show the real state.` : (r.error ?? "Failed.") });
+      if (multi) setTimeout(() => window.location.reload(), 3500);
+    }
   }
 
   function startEdit(h: HubRow) {
+    if (editing && editing !== h.id && !window.confirm("Discard the unsaved changes on the hub you were editing?")) return;
     setEditing(h.id);
     setDraft([{ ...h.pocs[0] }, { ...h.pocs[1] }, { ...h.pocs[2] }]);
     setMsg(null);
@@ -206,12 +230,12 @@ export default function PocDirectory({ hubs, zones, globals, placeholders, chang
             </select>
           </div>
           <div className="field" style={{ minWidth: 160 }}>
-            <label>New person: name</label>
-            <input type="text" value={to.name} onChange={(e) => setTo({ ...to, name: e.target.value })} />
+            <label htmlFor="rn">New person: name</label>
+            <input id="rn" type="text" value={to.name} onChange={(e) => setTo({ ...to, name: e.target.value })} />
           </div>
           <div className="field" style={{ minWidth: 220 }}>
-            <label>New person: XB email</label>
-            <input type="email" value={to.email} onChange={(e) => setTo({ ...to, email: e.target.value })} />
+            <label htmlFor="re">New person: XB email</label>
+            <input id="re" type="email" value={to.email} onChange={(e) => setTo({ ...to, email: e.target.value })} />
           </div>
         </div>
         <div className="row">
@@ -332,8 +356,8 @@ function ZonesAndGlobals({ zones, globals, run, busy }: { zones: ZoneRow[]; glob
               <option value="OPS_HEAD">OPS_HEAD</option><option value="SYSTEM_ADMIN">SYSTEM_ADMIN</option>
             </select>
           </div>
-          <div className="field"><label>Name</label><input type="text" value={g.name} onChange={(e) => setG({ ...g, name: e.target.value })} /></div>
-          <div className="field"><label>XB email</label><input type="email" value={g.email} onChange={(e) => setG({ ...g, email: e.target.value })} /></div>
+          <div className="field"><label htmlFor="gn">Name</label><input id="gn" type="text" value={g.name} onChange={(e) => setG({ ...g, name: e.target.value })} /></div>
+          <div className="field"><label htmlFor="ge">XB email</label><input id="ge" type="email" value={g.email} onChange={(e) => setG({ ...g, email: e.target.value })} /></div>
           <button className="btn small" disabled={busy} onClick={() => run({ action: "setGlobalContact", role, person: g, remove: false }, () => setG(blank()))}>Add</button>
         </div>
       </section>

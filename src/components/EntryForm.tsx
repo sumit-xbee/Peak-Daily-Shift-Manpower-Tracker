@@ -1,7 +1,9 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { classify, type Thresholds } from "@/lib/classify";
+import { leadingDigits, postJson } from "@/lib/client";
 
 export interface EntryRowProps {
   roundId: string;
@@ -27,11 +29,13 @@ interface Props {
   sessionEmail?: string; // present on the dashboard
 }
 
-interface Saved { roundId: string; adhoc: number; cls: "LOW" | "EXCESS" | "OK"; unchanged: boolean }
+interface Saved { p: string; a: string; cls: "LOW" | "EXCESS" | "OK" }
+type SaveResponse = { ok?: boolean; error?: string; needsConfirm?: boolean; warnings?: string[]; saved?: { roundId: string; cls: "LOW" | "EXCESS" | "OK" }[] };
 
 const EMAIL_KEY = "pst_email";
 
 export default function EntryForm({ rows, token, canDelegate, allowedDomains, reasons, sessionEmail }: Props) {
+  const router = useRouter();
   const [vals, setVals] = useState<Record<string, { p: string; a: string; reason: string }>>(() =>
     Object.fromEntries(rows.map((r) => [r.roundId, { p: r.planned !== null ? String(r.planned) : "", a: r.actual !== null ? String(r.actual) : "", reason: "" }])),
   );
@@ -51,17 +55,23 @@ export default function EntryForm({ rows, token, canDelegate, allowedDomains, re
     } catch { /* storage can be blocked; the field still works */ }
   }, [sessionEmail]);
 
-  const set = (id: string, k: "p" | "a" | "reason", v: string) =>
-    setVals((s) => ({ ...s, [id]: { ...s[id], [k]: k === "reason" ? v : v.replace(/\D/g, "").slice(0, 5) } }));
+  // Any change to a number or reason withdraws a pending "please check" box: it was about the OLD numbers,
+  // and "Yes, save" must never save something the person has not been warned about.
+  const set = (id: string, k: "p" | "a" | "reason", v: string) => {
+    setWarnings(null);
+    setVals((s) => ({ ...s, [id]: k === "reason" ? { ...s[id], reason: v } : { ...s[id], [k]: leadingDigits(v), reason: "" } }));
+  };
 
   const emailOk = (() => {
     const e = email.trim().toLowerCase();
-    return /^[^\s@]+@[^\s@]+$/.test(e) && allowedDomains.includes(e.split("@")[1]);
+    return /^[^\s@]+@[^\s@]+$/.test(e) && e.length <= 254 && allowedDomains.includes(e.split("@")[1]);
   })();
 
   async function submit(confirm: boolean) {
+    if (busy) return;
     setErr(null);
     const items: { roundId: string; planned: number; actual: number; reason?: string }[] = [];
+    const sent: Record<string, Saved> = {};
     for (const r of rows) {
       const v = vals[r.roundId];
       if (v.p === "" && v.a === "") continue;
@@ -69,48 +79,38 @@ export default function EntryForm({ rows, token, canDelegate, allowedDomains, re
         setErr(`${r.hub} ${r.label}: please fill both Planned and Actual.`);
         return;
       }
-      items.push({ roundId: r.roundId, planned: Number(v.p), actual: Number(v.a), reason: v.reason || undefined });
+      const cls = classify(Number(v.p), Number(v.a), r.thresholds);
+      items.push({ roundId: r.roundId, planned: Number(v.p), actual: Number(v.a), reason: cls !== "OK" && v.reason ? v.reason : undefined });
+      sent[r.roundId] = { p: v.p, a: v.a, cls };
     }
     if (!items.length) return setErr("Please enter the numbers first.");
     if (!sessionEmail && !emailOk) return setErr(`Please enter your XB email (${allowedDomains.map((d) => "@" + d).join(" or ")}).`);
 
     setBusy(true);
-    try {
-      const res = await fetch("/api/entry", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, email: sessionEmail ? undefined : email.trim(), items, confirm }),
-      });
-      const j = (await res.json()) as { ok?: boolean; error?: string; needsConfirm?: boolean; warnings?: string[]; saved?: (Saved & { hub: string })[] };
-      if (j.needsConfirm) {
-        setWarnings(j.warnings ?? []);
-      } else if (j.ok && j.saved) {
-        setWarnings(null);
-        setSaved(Object.fromEntries(j.saved.map((s) => [s.roundId, s])));
-        if (!sessionEmail) {
-          try { localStorage.setItem(EMAIL_KEY, email.trim().toLowerCase()); } catch { /* ignore */ }
-        }
-        window.scrollTo({ top: 0, behavior: "smooth" });
-      } else {
-        setWarnings(null);
-        setErr(j.error ?? "Could not save. Please try again.");
+    const res = await postJson<SaveResponse>("/api/entry", { token, email: sessionEmail ? undefined : email.trim(), items, confirm });
+    setBusy(false);
+    const j = res.data;
+    if (j?.needsConfirm) {
+      setWarnings(j.warnings ?? []);
+    } else if (res.ok && j?.saved) {
+      setWarnings(null);
+      setSaved((s) => ({ ...s, ...Object.fromEntries(j.saved!.map((x) => [x.roundId, { ...sent[x.roundId], cls: x.cls }])) }));
+      if (!sessionEmail) {
+        try { localStorage.setItem(EMAIL_KEY, email.trim().toLowerCase()); } catch { /* ignore */ }
       }
-    } catch {
-      setErr("No connection. Please try again.");
-    } finally {
-      setBusy(false);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      router.refresh(); // the "who has entered" board below updates; what has been typed stays
+    } else {
+      setWarnings(null);
+      setErr(res.error);
     }
   }
 
   async function makeShare(roundId: string) {
     setErr(null);
-    const res = await fetch("/api/delegate", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, roundId, email: emailOk ? email.trim() : undefined }),
-    });
-    const j = (await res.json()) as { ok?: boolean; url?: string; error?: string };
-    if (j.ok && j.url) setShare((s) => ({ ...s, [roundId]: j.url! }));
-    else setErr(j.error ?? "Could not create the link.");
+    const res = await postJson<{ ok?: boolean; url?: string; error?: string }>("/api/delegate", { token, roundId, email: emailOk ? email.trim() : undefined });
+    if (res.ok && res.data?.url) setShare((s) => ({ ...s, [roundId]: res.data!.url! }));
+    else setErr(res.error);
   }
 
   async function copy(roundId: string) {
@@ -123,7 +123,7 @@ export default function EntryForm({ rows, token, canDelegate, allowedDomains, re
     }
   }
 
-  const anySaved = Object.keys(saved).length > 0;
+  const anySaved = Object.values(saved).length > 0;
 
   return (
     <div>
@@ -150,6 +150,8 @@ export default function EntryForm({ rows, token, canDelegate, allowedDomains, re
         const need = p !== null && a !== null ? p - a : null;
         const cls = p !== null && a !== null ? classify(p, a, r.thresholds) : null;
         const s = saved[r.roundId];
+        // "Saved" only while the boxes still hold what was saved
+        const isSaved = Boolean(s && s.p === v.p && s.a === v.a);
         return (
           <div className="entry" key={r.roundId}>
             <div className="head">
@@ -157,12 +159,12 @@ export default function EntryForm({ rows, token, canDelegate, allowedDomains, re
                 <strong style={{ fontSize: 17 }}>{r.hub}</strong> <span className="muted">{r.zone}</span>
                 <div className="muted small">Shift {r.label} · enter by {r.cutoffText}</div>
               </div>
-              {(s || r.alreadyEntered) && <span className="chip okc">✓ {s ? "Saved" : "Already entered"}</span>}
+              {(isSaved || (!s && r.alreadyEntered)) && <span className="chip okc">✓ {isSaved ? "Saved" : "Already entered"}</span>}
             </div>
             <div className="nums">
               <div className="field">
                 <label htmlFor={`p-${r.roundId}`}>Planned Manpower – Hub Processing</label>
-                <input id={`p-${r.roundId}`} type="text" inputMode="numeric" autoComplete="off" value={v.p} onChange={(e) => set(r.roundId, "p", e.target.value)} placeholder="0" />
+                <input id={`p-${r.roundId}`} type="text" inputMode="numeric" autoComplete="off" maxLength={8} value={v.p} disabled={busy} onChange={(e) => set(r.roundId, "p", e.target.value)} placeholder="0" />
                 {r.hintPlan !== null && v.p === "" && (
                   <button type="button" className="btn secondary small" style={{ marginTop: 6 }} onClick={() => set(r.roundId, "p", String(r.hintPlan))}>
                     Last time: {r.hintPlan} — use it
@@ -171,7 +173,7 @@ export default function EntryForm({ rows, token, canDelegate, allowedDomains, re
               </div>
               <div className="field">
                 <label htmlFor={`a-${r.roundId}`}>Actual Manpower – Hub Processing</label>
-                <input id={`a-${r.roundId}`} type="text" inputMode="numeric" autoComplete="off" value={v.a} onChange={(e) => set(r.roundId, "a", e.target.value)} placeholder="0" />
+                <input id={`a-${r.roundId}`} type="text" inputMode="numeric" autoComplete="off" maxLength={8} value={v.a} disabled={busy} onChange={(e) => set(r.roundId, "a", e.target.value)} placeholder="0" />
               </div>
             </div>
             <div className="live" aria-live="polite">
@@ -184,7 +186,7 @@ export default function EntryForm({ rows, token, canDelegate, allowedDomains, re
             {(cls === "LOW" || cls === "EXCESS") && (
               <div className="field" style={{ marginTop: 10 }}>
                 <label htmlFor={`rs-${r.roundId}`}>Reason (optional)</label>
-                <select id={`rs-${r.roundId}`} value={v.reason} onChange={(e) => set(r.roundId, "reason", e.target.value)}>
+                <select id={`rs-${r.roundId}`} value={v.reason} disabled={busy} onChange={(e) => set(r.roundId, "reason", e.target.value)}>
                   <option value="">Select a reason</option>
                   {reasons.map((x) => <option key={x}>{x}</option>)}
                 </select>

@@ -129,7 +129,7 @@ export function openEmail(o: { name: string; items: RoundInfo[]; url: string; of
       band: "blue",
       tag: "ACTION NEEDED  |  MANPOWER ENTRY",
       heading: o.items.length === 1 ? `Enter manpower for ${o.items[0].hub}` : `Enter manpower for ${o.items.length} shifts`,
-      intro: `Hi ${o.name}, the shift below started 30 minutes ago. Please enter the Planned and Actual Manpower - Hub Processing.`,
+      intro: `Hi ${o.name}, manpower entry is now open for the shift below. Please enter the Planned and Actual Manpower - Hub Processing.`,
       table: { head: ["Hub", "Shift", "Enter"], rows: roundRows(o.items, o.off) },
       button: { label: "Enter manpower", url: o.url },
       note: "Takes about 30 seconds. You can forward this email to your shift in-charge; the link works for them too.",
@@ -153,7 +153,7 @@ export function escalationEmail(o: { name: string; items: RoundInfo[]; url: stri
     band: "red",
     tag: "ESCALATION  |  NO ENTRY",
     heading: "No manpower entry has been made",
-    intro: `Hi ${o.name}, ${o.notified} were reminded an hour ago, and there is still no entry for the shift(s) below. Please enter it, or ask the shift in-charge to.`,
+    intro: `Hi ${o.name}, ${o.notified} ${o.notified.includes(" and ") ? "were" : "was"} already reminded, and there is still no entry for the shift(s) below. Please enter it, or ask the shift in-charge to.`,
     table: { head: ["Hub", "Shift", "Enter"], rows: roundRows(o.items, o.off) },
     button: { label: "Enter manpower", url: o.url },
   });
@@ -163,7 +163,7 @@ export function overdueNoticeEmail(o: { name: string; rows: { hub: string; zone:
   return render(`OVERDUE: ${o.rows.length} shift${o.rows.length === 1 ? "" : "s"} with no manpower entry`, {
     band: "red",
     tag: "OVERDUE  |  FOR YOUR ATTENTION",
-    heading: `${o.rows.length} shift${o.rows.length === 1 ? " has" : "s have"} no manpower entry after 2 hours`,
+    heading: `${o.rows.length} shift${o.rows.length === 1 ? " has" : "s have"} still not been entered`,
     intro: `Hi ${o.name}, the POCs were emailed and reminded. These are still pending.`,
     table: { head: ["Hub", "Zone", "Shift", "POCs"], rows: o.rows.map((r) => [r.hub, r.zone, r.label, r.pocs]) },
     button: { label: "Open dashboard", url: o.dashboardUrl },
@@ -182,13 +182,13 @@ export interface AlertInfo {
   off: number;
 }
 
-export function lowAlertEmail(o: { name: string; a: AlertInfo; ackUrl?: string; dashboardUrl: string }): Rendered {
+export function lowAlertEmail(o: { name: string; a: AlertInfo; ackUrl?: string; dashboardUrl: string; update?: boolean }): Rendered {
   const a = o.a;
-  return render(`LOW MANPOWER: ${a.hub} ${a.label} short by ${a.need}`, {
+  return render(`${o.update ? "UPDATE: " : ""}LOW MANPOWER: ${a.hub} ${a.label} ${o.update ? "now " : ""}short by ${a.need}`, {
     band: "red",
-    tag: "LOW MANPOWER  |  CRITICAL",
-    heading: `${a.hub} (${a.zone}) is short by ${a.need}`,
-    intro: `Hi ${o.name}, ${a.enteredBy} reported this at ${fmtDateTime(a.enteredAt, a.off)} for the ${a.label} shift.`,
+    tag: o.update ? "LOW MANPOWER  |  UPDATED NUMBERS" : "LOW MANPOWER  |  CRITICAL",
+    heading: `${a.hub} (${a.zone}) is ${o.update ? "now " : ""}short by ${a.need}`,
+    intro: `Hi ${o.name}, ${a.enteredBy} ${o.update ? "corrected the numbers" : "reported this"} at ${fmtDateTime(a.enteredAt, a.off)} for the ${a.label} shift.`,
     strip: [
       { label: "Planned", value: String(a.planned) },
       { label: "Actual", value: String(a.actual) },
@@ -218,7 +218,7 @@ export function excessAlertEmail(o: { name: string; a: AlertInfo; dashboardUrl: 
 
 export function resolvedEmail(o: { name: string; a: AlertInfo; was: "LOW" | "EXCESS"; dashboardUrl: string }): Rendered {
   const a = o.a;
-  return render(`UPDATE: ${a.hub} ${a.label} is back within limits`, {
+  return render(`UPDATE: ${a.hub} ${a.label} is no longer ${o.was === "LOW" ? "short" : "in excess"}`, {
     band: "green",
     tag: "UPDATE  |  RESOLVED",
     heading: `${a.hub} is no longer ${o.was === "LOW" ? "short" : "in excess"}`,

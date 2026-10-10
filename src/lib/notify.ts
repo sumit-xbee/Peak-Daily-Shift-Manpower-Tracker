@@ -36,6 +36,13 @@ export async function enqueue(m: OutMsg): Promise<boolean> {
   return (data?.length ?? 0) > 0;
 }
 
+/** Has an email with this dedupe key already been queued? */
+export async function isQueued(dedupeKey: string): Promise<boolean> {
+  const { data, error } = await db().from("outbox").select("id").eq("dedupe_key", dedupeKey).limit(1);
+  if (error) throw new Error(`check queue: ${error.message}`);
+  return (data?.length ?? 0) > 0;
+}
+
 /** Stable short id for a set of round ids (used in dedupe keys). */
 export const groupId = (ids: string[]) =>
   createHash("sha1").update([...ids].sort().join(",")).digest("hex").slice(0, 16);

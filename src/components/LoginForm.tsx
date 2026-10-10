@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { postJson } from "@/lib/client";
 
 export default function LoginForm() {
   const [email, setEmail] = useState("");
@@ -9,34 +10,29 @@ export default function LoginForm() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "err" | "ok"; text: string } | null>(null);
 
-  async function post(url: string, body: unknown) {
-    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    return (await r.json().catch(() => ({ ok: false, error: "Something went wrong." }))) as { ok: boolean; error?: string };
-  }
-
   async function sendCode(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setMsg(null);
-    const j = await post("/api/auth/request", { email });
+    const res = await postJson("/api/auth/request", { email });
     setBusy(false);
-    if (j.ok) {
+    if (res.ok) {
       setStep("code");
       setMsg({ kind: "ok", text: "Code sent. Check your inbox (and spam folder)." });
-    } else setMsg({ kind: "err", text: j.error ?? "Could not send the code." });
+    } else setMsg({ kind: "err", text: res.error ?? "Could not send the code." });
   }
 
   async function verify(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setMsg(null);
-    const j = await post("/api/auth/verify", { email, code });
-    if (j.ok) {
+    const res = await postJson("/api/auth/verify", { email, code });
+    if (res.ok) {
       window.location.href = "/dashboard";
       return;
     }
     setBusy(false);
-    setMsg({ kind: "err", text: j.error ?? "Wrong code." });
+    setMsg({ kind: "err", text: res.error ?? "Wrong code." });
   }
 
   return (

@@ -1,24 +1,39 @@
 import type { EntryRowProps } from "@/components/EntryForm";
-import { db } from "./db";
-import { loadEntrySummaries, type RoundView } from "./rounds";
+import { db, must } from "./db";
+import type { RoundView } from "./rounds";
 import { fmtDateTime } from "./time";
 
-/** The plan most recently entered for the same hub shift on an earlier day (a typing shortcut, never forced). */
-export async function lastPlanHint(hubShiftId: string, beforeDate: string): Promise<number | null> {
-  const { data } = await db().from("rounds").select("id").eq("hub_shift_id", hubShiftId).lt("round_date", beforeDate).order("round_date", { ascending: false }).limit(5);
-  if (!data?.length) return null;
-  const sums = await loadEntrySummaries(data.map((r) => r.id as string));
-  for (const r of data) {
-    const e = sums.get(r.id as string);
-    if (e) return e.latest.planned;
+/**
+ * The plan most recently entered for each hub shift on an earlier day (a typing shortcut, never forced).
+ * ONE query for all shifts, instead of two per row.
+ */
+export async function lastPlanHints(shiftIds: string[], beforeDate: string): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (!shiftIds.length) return out;
+  const since = new Date(new Date(`${beforeDate}T00:00:00Z`).getTime() - 21 * 86400_000).toISOString().slice(0, 10);
+  const rows = must(
+    await db()
+      .from("entries")
+      .select("planned,created_at,rounds!inner(hub_shift_id,round_date)")
+      .in("rounds.hub_shift_id", shiftIds)
+      .lt("rounds.round_date", beforeDate)
+      .gte("rounds.round_date", since)
+      .order("created_at", { ascending: false })
+      .limit(1000),
+    "load plan hints",
+  ) as unknown as { planned: number; rounds: { hub_shift_id: string } | { hub_shift_id: string }[] }[];
+  for (const r of rows) {
+    const rd = Array.isArray(r.rounds) ? r.rounds[0] : r.rounds;
+    if (rd && !out.has(rd.hub_shift_id)) out.set(rd.hub_shift_id, r.planned); // newest first, so the first one seen is the latest
   }
-  return null;
+  return out;
 }
 
 export async function toEntryRows(views: RoundView[]): Promise<EntryRowProps[]> {
-  // the "last time" hints are looked up all at once, not one row after another
-  const hints = await Promise.all(views.map((v) => (v.entry ? Promise.resolve(null) : lastPlanHint(v.shift.id, v.round.round_date))));
-  return views.map((v, i) => ({
+  const needHint = views.filter((v) => !v.entry);
+  const date = needHint[0]?.round.round_date;
+  const hints = date ? await lastPlanHints([...new Set(needHint.map((v) => v.shift.id))], date) : new Map<string, number>();
+  return views.map((v) => ({
     roundId: v.round.id,
     hub: v.shift.hub.name,
     zone: v.shift.hub.zone.name,
@@ -26,7 +41,7 @@ export async function toEntryRows(views: RoundView[]): Promise<EntryRowProps[]> 
     cutoffText: fmtDateTime(v.times.cutoffAt, v.cfg.tzOff).split(", ")[1],
     planned: v.entry ? v.entry.latest.planned : null,
     actual: v.entry ? v.entry.latest.actual : null,
-    hintPlan: hints[i],
+    hintPlan: v.entry ? null : (hints.get(v.shift.id) ?? null),
     thresholds: v.cfg.thresholds,
     alreadyEntered: Boolean(v.entry),
     status: v.status,

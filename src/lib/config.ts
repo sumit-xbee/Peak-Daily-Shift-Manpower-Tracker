@@ -1,6 +1,6 @@
 import { DEFAULT_THRESHOLDS, type Thresholds } from "./classify";
 import { cached, invalidateCaches } from "./cache";
-import { db, selectAll } from "./db";
+import { db, mustOk, selectAll } from "./db";
 import type { Offsets } from "./schedule";
 
 export interface Config {
@@ -30,6 +30,10 @@ export interface Config {
   /** the morning report to POC3 (regional managers) about yesterday */
   poc3ReportEnabled: boolean;
   poc3ReportTimeIst: string;
+  /** dashboard login limited to people who exist in the master data */
+  loginKnownOnly: boolean;
+  /** a round must be created within this many minutes of opening (stops back-dated rounds for new shifts) */
+  roundCreateGraceMin: number;
 }
 
 type Raw = Record<string, unknown>;
@@ -84,6 +88,8 @@ export function buildConfig(r: Raw): Config {
     placeholderEmails: strArr(r.placeholder_emails, []).map((e) => e.toLowerCase()),
     poc3ReportEnabled: bool(r.poc3_report_enabled, true),
     poc3ReportTimeIst: str(r.poc3_report_time_ist, "06:00"),
+    loginKnownOnly: bool(r.login_known_people_only, false),
+    roundCreateGraceMin: num(r.round_create_grace_min, 60),
   };
 }
 
@@ -93,7 +99,7 @@ export async function loadRawConfig(fresh = false): Promise<Raw> {
     "config",
     20_000,
     async () => {
-      const rows = await selectAll<{ key: string; value: unknown }>("app_config", "key,value");
+      const rows = await selectAll<{ key: string; value: unknown }>("app_config", "key,value", undefined, ["key"]);
       return Object.fromEntries(rows.map((r) => [r.key, r.value])) as Raw;
     },
     fresh,
@@ -109,7 +115,7 @@ export async function loadOverrides(fresh = false): Promise<Map<string, Raw>> {
     "overrides",
     20_000,
     async () => {
-      const rows = await selectAll<{ hub_id: string; key: string; value: unknown }>("config_override", "hub_id,key,value");
+      const rows = await selectAll<{ hub_id: string; key: string; value: unknown }>("config_override", "hub_id,key,value", undefined, ["hub_id", "key"]);
       const m = new Map<string, Raw>();
       for (const r of rows) {
         const cur = m.get(r.hub_id) ?? {};
@@ -129,34 +135,50 @@ export function configForHub(base: Config, raw: Raw, overrides: Map<string, Raw>
   return buildConfig({ ...raw, ...o });
 }
 
-export function isAllowedEmail(email: string, cfg: Pick<Config, "allowedDomains">): boolean {
+/** The shape of an XB email: plain local part (letters, digits, . _ % + -) at an allowed domain, max 254 characters. */
+export function isAllowedEmail(email: unknown, cfg: Pick<Config, "allowedDomains">): boolean {
+  if (typeof email !== "string") return false;
   const e = email.trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+$/.test(e) || e.split("@").length !== 2) return false;
-  return cfg.allowedDomains.includes(e.split("@")[1]);
+  if (e.length > 254) return false;
+  const m = /^([a-z0-9._%+-]{1,64})@([a-z0-9.-]{1,190})$/.exec(e);
+  return m !== null && cfg.allowedDomains.includes(m[2]);
+}
+
+/** "Name+tag@xpressbees.com" and "name@xpressbees.com" are the same mailbox: used to rate-limit and identify logins. */
+export function baseEmail(email: string): string {
+  const e = email.trim().toLowerCase();
+  const at = e.lastIndexOf("@");
+  if (at < 1) return e;
+  return `${e.slice(0, at).split("+")[0]}${e.slice(at)}`;
 }
 
 export async function clearConfigOverride(hubId: string, key: string, by: string) {
-  invalidateCaches();
   const d = db();
   const old = await d.from("config_override").select("value").eq("hub_id", hubId).eq("key", key).maybeSingle();
-  await d.from("config_override").delete().eq("hub_id", hubId).eq("key", key);
-  await d.from("config_history").insert({ key, hub_id: hubId, old_value: old.data?.value ?? null, new_value: null, changed_by: by });
+  mustOk(old, "read override");
+  mustOk(await d.from("config_override").delete().eq("hub_id", hubId).eq("key", key), "remove override");
+  mustOk(await d.from("config_history").insert({ key, hub_id: hubId, old_value: old.data?.value ?? null, new_value: null, changed_by: by }), "log change");
+  invalidateCaches(); // after the write, so nobody re-caches the old value
 }
 
 export async function setConfigValue(key: string, value: unknown, by: string, hubId?: string) {
-  invalidateCaches();
   const d = db();
+  const now = new Date().toISOString();
   if (hubId) {
     const old = await d.from("config_override").select("value").eq("hub_id", hubId).eq("key", key).maybeSingle();
-    await d.from("config_override").upsert({ hub_id: hubId, key, value });
-    await d.from("config_history").insert({ key, hub_id: hubId, old_value: old.data?.value ?? null, new_value: value, changed_by: by });
+    mustOk(old, "read override");
+    mustOk(await d.from("config_override").upsert({ hub_id: hubId, key, value }), "save override");
+    mustOk(await d.from("config_history").insert({ key, hub_id: hubId, old_value: old.data?.value ?? null, new_value: value, changed_by: by }), "log change");
+    invalidateCaches();
     return;
   }
   const old = await d.from("app_config").select("value").eq("key", key).maybeSingle();
-  await d.from("app_config").upsert({ key, value, updated_at: new Date().toISOString(), updated_by: by });
-  await d.from("config_history").insert({ key, old_value: old.data?.value ?? null, new_value: value, changed_by: by });
-  // turning the system back on must not open rounds that were missed while it was off
-  if (key === "system_enabled" && value === true && old.data?.value !== true) {
-    await d.from("app_config").upsert({ key: "enabled_since", value: new Date().toISOString(), updated_at: new Date().toISOString(), updated_by: by });
-  }
+  mustOk(old, "read setting");
+  const rows: { key: string; value: unknown; updated_at: string; updated_by: string }[] = [{ key, value, updated_at: now, updated_by: by }];
+  // turning the system back on must not open rounds that were missed while it was off.
+  // Both settings are written in ONE statement so the scheduler can never see "on" without the new start time.
+  if (key === "system_enabled" && value === true && old.data?.value !== true) rows.push({ key: "enabled_since", value: now, updated_at: now, updated_by: by });
+  mustOk(await d.from("app_config").upsert(rows), "save setting");
+  mustOk(await d.from("config_history").insert({ key, old_value: old.data?.value ?? null, new_value: value, changed_by: by }), "log change");
+  invalidateCaches();
 }

@@ -1,13 +1,15 @@
 import SettingsForm from "@/components/SettingsForm";
 import Shell from "@/components/Shell";
+import { requireAdmin } from "@/lib/auth";
 import { loadRawConfig } from "@/lib/config";
-import { CONFIG_DEFS, showValue } from "@/lib/configdefs";
+import { CONFIG_DEFAULTS, CONFIG_DEFS, showValue } from "@/lib/configdefs";
 import { db } from "@/lib/db";
 import { fmtDateTime } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
+  await requireAdmin(); // checked against the database BEFORE any admin data is read
   // all four reads at once (and fresh, so a saved change shows immediately)
   const [raw, hubsRes, ov, h] = await Promise.all([
     loadRawConfig(true),
@@ -15,7 +17,8 @@ export default async function SettingsPage() {
     db().from("config_override").select("hub_id,key,value"),
     db().from("config_history").select("key,hub_id,old_value,new_value,changed_by,changed_at").order("changed_at", { ascending: false }).limit(25),
   ]);
-  const values = Object.fromEntries(CONFIG_DEFS.map((d) => [d.key, showValue(d, raw[d.key])]));
+  // a setting that was added after the database was first set up shows its default until it is saved
+  const values = Object.fromEntries(CONFIG_DEFS.map((d) => [d.key, showValue(d, raw[d.key] ?? CONFIG_DEFAULTS[d.key])]));
   const hubs = (hubsRes.data ?? []) as { id: string; name: string }[];
   const hubName = new Map(hubs.map((x) => [x.id, x.name]));
   const overrides = ((ov.data ?? []) as { hub_id: string; key: string; value: unknown }[]).map((o) => ({

@@ -3,7 +3,7 @@ import { loadOverrides, loadRawConfig } from "./config";
 import type { Poc3ReportRow } from "./emails";
 import { loadMaster, type Person } from "./master";
 import { fmtPct, rankRows, reportTotals, type ReportRow, type ReportTotals } from "./report";
-import { buildViews, loadEntrySummariesForDates, loadRoundsForDates, type RoundView } from "./rounds";
+import { buildViews, isLiveRound, loadEntrySummariesForDates, loadRoundsForDates, type RoundView } from "./rounds";
 
 export interface Poc3Report {
   person: Person;
@@ -24,7 +24,7 @@ export async function loadPoc3Reports(date: string, now = new Date()): Promise<{
 
   const byPerson = new Map<string, { person: Person; hubs: Set<string>; views: RoundView[] }>();
   for (const v of views) {
-    if (v.status === "NOT_DUE") continue;
+    if (v.status === "NOT_DUE" || !isLiveRound(v, master)) continue; // a switched-off hub or skipped day is not "missed"
     const p = v.shift.hub.pocs[2];
     const k = p.email.toLowerCase();
     const g = byPerson.get(k) ?? { person: p, hubs: new Set<string>(), views: [] };

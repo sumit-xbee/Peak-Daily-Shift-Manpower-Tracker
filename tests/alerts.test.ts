@@ -7,6 +7,7 @@ let seq = 0;
 
 class Q {
   private filters: [string, unknown][] = [];
+  private gteFilters: [string, string][] = [];
   private isNull: string[] = [];
   private op: "select" | "insert" | "update" | "upsert" = "select";
   private payload: Row = {};
@@ -14,6 +15,8 @@ class Q {
   constructor(private table: keyof typeof store) {}
   select() { return this; }
   eq(k: string, v: unknown) { this.filters.push([k, v]); return this; }
+  gte(k: string, v: string) { this.gteFilters.push([k, v]); return this; }
+  limit() { return this; }
   is(k: string) { this.isNull.push(k); return this; }
   insert(p: Row) { this.op = "insert"; this.payload = p; return this; }
   update(p: Row) { this.op = "update"; this.payload = p; return this; }
@@ -21,9 +24,12 @@ class Q {
   single() { this.wantSingle = true; return this; }
   private run() {
     const t = store[this.table];
-    const match = (r: Row) => this.filters.every(([k, v]) => r[k] === v) && this.isNull.every((k) => r[k] === null || r[k] === undefined);
+    const match = (r: Row) =>
+      this.filters.every(([k, v]) => r[k] === v) &&
+      this.gteFilters.every(([k, v]) => String(r[k] ?? "") >= v) &&
+      this.isNull.every((k) => r[k] === null || r[k] === undefined);
     if (this.op === "insert") {
-      const row = { id: `id${++seq}`, resolved_at: null, ...this.payload };
+      const row = { id: `id${++seq}`, resolved_at: null, created_at: new Date().toISOString(), ...this.payload };
       t.push(row);
       return { data: this.wantSingle ? row : [row], error: null };
     }
@@ -50,6 +56,9 @@ vi.mock("@/lib/db", () => ({
   must: (res: { data: unknown; error: { message: string } | null }) => {
     if (res.error) throw new Error(res.error.message);
     return res.data;
+  },
+  mustOk: (res: { error: { message: string } | null }) => {
+    if (res.error) throw new Error(res.error.message);
   },
 }));
 
@@ -143,5 +152,67 @@ describe("alert rules (default settings)", () => {
   it("if management ever wants excess emailed, it is one setting (not code)", async () => {
     await applyAlert(ctx(100, 120, { alert_recipients_excess: ["ZONE_HR"] }));
     expect(sentTo()).toEqual(["zonehr@xpressbees.com"]);
+  });
+});
+
+describe("alert robustness", () => {
+  it("a worse shortfall on an open LOW alert is stored and sent to the same people as an update", async () => {
+    await applyAlert(ctx(100, 88)); // short by 12
+    expect(store.outbox).toHaveLength(3);
+    await applyAlert(ctx(100, 60)); // now short by 40
+    expect(store.alerts).toHaveLength(1);
+    expect(store.alerts[0].adhoc_needed).toBe(40);
+    const updates = store.outbox.filter((o) => (o.subject as string).startsWith("UPDATE: LOW MANPOWER"));
+    expect(updates).toHaveLength(3);
+    expect(updates.every((o) => (o.subject as string).includes("now short by 40"))).toBe(true);
+    expect(updates.map((o) => o.to_email).sort()).toEqual(["ops@xpressbees.com", "zonehr@xpressbees.com", "zonerm@xpressbees.com"]);
+  });
+
+  it("the same corrected number saved twice does not send the update twice", async () => {
+    await applyAlert(ctx(100, 88));
+    await applyAlert(ctx(100, 60));
+    await applyAlert(ctx(100, 60));
+    expect(store.outbox).toHaveLength(6);
+  });
+
+  it("emails lost to a crash are queued again when the same numbers are saved once more", async () => {
+    await applyAlert(ctx(100, 88));
+    store.outbox.length = 0; // pretend the emails never made it
+    await applyAlert(ctx(100, 88));
+    expect(sentTo()).toEqual(["ops@xpressbees.com", "zonehr@xpressbees.com", "zonerm@xpressbees.com"]);
+    expect(store.outbox.every((o) => !(o.subject as string).startsWith("UPDATE"))).toBe(true);
+    expect(store.alerts).toHaveLength(1);
+  });
+
+  it("LOW corrected to EXCESS tells the people who were alerted that the shortfall is over", async () => {
+    await applyAlert(ctx(100, 88));
+    store.outbox.length = 0;
+    expect(await applyAlert(ctx(100, 125))).toBe("EXCESS");
+    expect(store.outbox.every((o) => o.kind === "resolved")).toBe(true);
+    expect(sentTo()).toEqual(["ops@xpressbees.com", "zonehr@xpressbees.com", "zonerm@xpressbees.com"]);
+    expect(store.alerts.filter((a) => a.resolved_at === null).map((a) => a.class)).toEqual(["EXCESS"]);
+  });
+
+  it("a shift that keeps flipping LOW / OK cannot flood HR: emails stop after a few", async () => {
+    for (let i = 0; i < 6; i++) {
+      await applyAlert(ctx(100, 80));
+      await applyAlert(ctx(100, 100));
+    }
+    const afterSix = store.outbox.length;
+    expect(afterSix).toBeLessThanOrEqual(24);
+    for (let i = 0; i < 6; i++) {
+      await applyAlert(ctx(100, 80));
+      await applyAlert(ctx(100, 100));
+    }
+    expect(store.outbox.length).toBe(afterSix); // nothing more is sent
+    expect(store.alerts.length).toBeGreaterThan(6); // but every one is still recorded for the dashboard
+  });
+
+  it("an acknowledge link made for a late edit is valid for a day from NOW, not from the long-gone cut-off", async () => {
+    const c = ctx(100, 80);
+    c.cutoffAt = new Date("2020-01-01T00:00:00Z");
+    await applyAlert(c);
+    const link = store.link_tokens[0];
+    expect(new Date(link.expires_at as string).getTime()).toBeGreaterThan(Date.now() + 23 * 3600_000);
   });
 });

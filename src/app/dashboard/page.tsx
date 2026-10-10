@@ -22,14 +22,19 @@ export default async function HubView({ searchParams }: { searchParams: Promise<
 
   // chart: the largest gaps against plan first (by %), entered rows only
   const entered = views.filter((v) => v.entry);
-  const gapOf = (v: (typeof entered)[number]) => Math.abs(gapPercent(v.entry!.latest.planned, v.entry!.latest.actual) ?? 0);
+  // a shift with nothing planned has no % gap, so it is ranked by headcount among the biggest rather than dropped to the bottom
+  const gapOf = (v: (typeof entered)[number]) => {
+    const g = gapPercent(v.entry!.latest.planned, v.entry!.latest.actual);
+    return g === null ? (v.entry!.latest.adhoc_needed === 0 ? 0 : 1e6) : Math.abs(g);
+  };
   const chartRows: BarRow[] = [...entered]
     .sort((a, b) => gapOf(b) - gapOf(a) || Math.abs(b.entry!.latest.adhoc_needed) - Math.abs(a.entry!.latest.adhoc_needed))
     .slice(0, 25)
     .map((v) => {
       const n = v.entry!.latest.adhoc_needed;
       return {
-        label: `${v.shift.hub.name} ${v.label}`,
+        label: v.shift.hub.name,
+        sub: v.label,
         short: n > 0 ? n : 0,
         excess: n < 0 ? -n : 0,
         detail: `Planned ${v.entry!.latest.planned}, Actual ${v.entry!.latest.actual}, gap ${fmtPct(gapPercent(v.entry!.latest.planned, v.entry!.latest.actual))}`,
@@ -63,7 +68,11 @@ export default async function HubView({ searchParams }: { searchParams: Promise<
 
       <section className="card" aria-labelledby="chart-h">
         <h2 id="chart-h">Largest gaps vs plan {entered.length > 25 ? `(top 25 of ${entered.length})` : ""}</h2>
-        <DivergingBars rows={chartRows} limit={day.cfg.thresholds.mode === "absolute" ? Math.max(day.cfg.thresholds.low, day.cfg.thresholds.excess) : undefined} />
+        <DivergingBars
+          rows={chartRows}
+          limitShort={day.cfg.thresholds.mode === "absolute" ? day.cfg.thresholds.low : undefined}
+          limitExcess={day.cfg.thresholds.mode === "absolute" ? day.cfg.thresholds.excess : undefined}
+        />
       </section>
 
       <section className="card" aria-labelledby="tbl-h">

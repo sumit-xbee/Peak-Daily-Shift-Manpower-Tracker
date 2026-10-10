@@ -1,6 +1,6 @@
 import { ClassChip } from "@/components/Chip";
 import Shell from "@/components/Shell";
-import { db } from "@/lib/db";
+import { db, must } from "@/lib/db";
 import { loadMaster } from "@/lib/master";
 import { loadConfig } from "@/lib/config";
 import { loadRoundsByIds } from "@/lib/rounds";
@@ -11,19 +11,24 @@ export const dynamic = "force-dynamic";
 export default async function AlertsPage() {
   const cfg = await loadConfig();
   const since = new Date(Date.now() - 7 * 86400000).toISOString();
-  const { data } = await db()
-    .from("alerts")
-    .select("id,round_id,class,adhoc_needed,ack_required,acked_by,acked_at,ack_eta,repeat_count,created_at,resolved_at")
-    .gte("created_at", since)
-    .order("created_at", { ascending: false })
-    .limit(300);
+  const [list, openCount] = await Promise.all([
+    db()
+      .from("alerts")
+      .select("id,round_id,class,adhoc_needed,ack_required,acked_by,acked_at,ack_eta,repeat_count,created_at,resolved_at")
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(500),
+    // the count of open alerts is asked separately, so it stays right even when more than the list shows are open
+    db().from("alerts").select("id", { count: "exact", head: true }).is("resolved_at", null),
+  ]);
+  const data = must(list, "load alerts");
   const alerts = (data ?? []) as {
     id: string; round_id: string; class: "LOW" | "EXCESS"; adhoc_needed: number; ack_required: boolean; acked_by: string | null;
     acked_at: string | null; ack_eta: string | null; repeat_count: number; created_at: string; resolved_at: string | null;
   }[];
   const [master, rounds] = await Promise.all([loadMaster(), loadRoundsByIds([...new Set(alerts.map((a) => a.round_id))])]);
   const roundMap = new Map(rounds.map((r) => [r.id, r]));
-  const open = alerts.filter((a) => !a.resolved_at);
+  const open = { length: openCount.count ?? alerts.filter((a) => !a.resolved_at).length };
 
   return (
     <Shell active="/dashboard/alerts">

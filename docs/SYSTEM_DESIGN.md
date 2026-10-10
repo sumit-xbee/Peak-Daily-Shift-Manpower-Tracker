@@ -267,6 +267,18 @@ Every email has **one purpose and one button**. They use HTML with inline CSS an
 - **Time.** Stored in UTC, computed in IST. Overnight shifts are supported, and the round date is the shift's start date.
 - **Backups (free).** A nightly scheduled export of all tables to CSV, stored in a company-controlled location. The volume is tiny, so the free tiers are ample.
 
+### Hardening added after the end-to-end review
+
+- **Email delivery policy** (per email kind). LOW alerts keep retrying for 24 h (more than 20 attempts, so a ~30 min Gmail outage is survived). "Please enter" reminders and L3 escalations expire after about 90 min, because a stale reminder is worse than none. Emails whose recipient list is empty in dry-run are held, not sent. The admin can re-queue failed mail (last 24 h) from Admin > Emails.
+- **Alert state machine.** One open alert per round (unique partial index). A class change sends an "updated" or "resolved" email; flapping is capped at 4 changes per 6 h. EXCESS is shown in the UI only and is never emailed.
+- **Round creation grace.** A hub-shift whose round time passed up to `round_create_grace_min` (default 60) ago is still created, so a short outage at midnight does not lose rounds.
+- **Health.** `/health` reports the last heartbeat (`enabled`, `dryRun`, error count, duration). The heartbeat is written last, so a tick that crashed is never reported healthy.
+- **Settings.** `login_known_people_only` (default off) restricts dashboard login to people already in the directory. Every setting is validated on the server with the same rules as the form.
+- **Input safety.** Emails are checked as plain mailboxes on the allowed domains (the +tag is ignored for login rate limits). Pasted decimals or signs in number boxes never become a bigger number. Impossible dates in a URL fall back to today. Rate limit: 20 entries per round per hour.
+- **Security headers.** CSP, Permissions-Policy, frame and referrer protections on every page.
+- **Data hygiene.** `0002_hardening.sql` adds indexes and a daily `cleanup_old_data()` job at 02:30 IST (pg_cron) that removes only throw-away data: emails older than 30 days, expired login codes and links. Entries, rounds, alerts, audit and config history are kept.
+- **Import script.** `scripts/import-master.mjs` supports `--check` (validate only), `--prune` (remove hubs/people no longer in the sheet) and `--update-existing`.
+
 ---
 
 ## 6. Rollout order (gate between each step)

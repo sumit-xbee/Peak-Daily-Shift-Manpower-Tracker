@@ -16,6 +16,10 @@ function getTransporter(): Transporter {
       secure: true,
       pool: true,
       maxConnections: 1,
+      // a stuck connection must fail fast, well inside the 60 s the scheduler is allowed to run
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 20_000,
       auth: { user: process.env.GMAIL_USER, pass: (process.env.GMAIL_APP_PASSWORD ?? "").replace(/\s+/g, "") },
     });
   }

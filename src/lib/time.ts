@@ -43,4 +43,9 @@ export function fmtDateTime(d: Date | string, off = DEFAULT_OFFSET_MIN): string 
   return `${t.getUTCDate()} ${months[t.getUTCMonth()]}, ${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}`;
 }
 
-export const isDateStr = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+/** A real calendar date in YYYY-MM-DD form ("2026-02-31" and "2026-13-01" are refused). */
+export function isDateStr(s: string): boolean {
+  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s; // an impossible date makes an invalid Date, which must not throw
+}

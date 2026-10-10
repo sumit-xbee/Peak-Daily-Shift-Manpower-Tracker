@@ -1,5 +1,6 @@
 import PocDirectory, { type ChangeRow, type GlobalRow, type HubRow, type ZoneRow } from "@/components/PocDirectory";
 import Shell from "@/components/Shell";
+import { requireAdmin } from "@/lib/auth";
 import { loadConfig } from "@/lib/config";
 import { db } from "@/lib/db";
 import { loadMaster } from "@/lib/master";
@@ -8,6 +9,7 @@ import { fmtDateTime } from "@/lib/time";
 export const dynamic = "force-dynamic";
 
 export default async function PocPage() {
+  await requireAdmin(); // checked against the database BEFORE any admin data is read
   const [master, cfg] = await Promise.all([loadMaster(true), loadConfig(true)]);
 
   const shiftCount = new Map<string, number>();

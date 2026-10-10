@@ -33,10 +33,12 @@ export default function NavProgress() {
       if (f && (f.method || "get").toLowerCase() === "get" && !e.defaultPrevented) start();
     };
     document.addEventListener("click", onClick, true);
-    document.addEventListener("submit", onSubmit, true);
+    // bubble phase (no `true`): React's own onSubmit handlers have already run and called preventDefault()
+    // for forms handled in JavaScript, so only genuine page-loading forms (like the date filter) start the bar
+    document.addEventListener("submit", onSubmit);
     return () => {
       document.removeEventListener("click", onClick, true);
-      document.removeEventListener("submit", onSubmit, true);
+      document.removeEventListener("submit", onSubmit);
     };
   }, []);
 

@@ -1,53 +1,62 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { postJson } from "@/lib/client";
 import { CONFIG_DEFS, OVERRIDE_KEYS, parseValue, type ConfigDef } from "@/lib/configdefs";
 
 interface Override { hubId: string; hubName: string; key: string; value: string }
 interface Hist { at: string; key: string; hub: string | null; oldV: string; newV: string; by: string | null }
 
-async function post(body: unknown) {
-  const r = await fetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  return (await r.json().catch(() => ({ ok: false, error: "Failed." }))) as { ok: boolean; error?: string };
-}
-
 export default function SettingsForm({ values, hubs, overrides, history }: {
   values: Record<string, string>; hubs: { id: string; name: string }[]; overrides: Override[]; history: Hist[];
 }) {
+  const router = useRouter();
   const [vals, setVals] = useState(values);
   const [saved, setSaved] = useState<Record<string, "ok" | string>>({});
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [ovHub, setOvHub] = useState("");
   const [ovKey, setOvKey] = useState(OVERRIDE_KEYS[0]);
   const [ovVal, setOvVal] = useState("");
   const [ovMsg, setOvMsg] = useState<string | null>(null);
+  const [ovBusy, setOvBusy] = useState(false);
 
   const groups = [...new Set(CONFIG_DEFS.map((d) => d.group))];
 
   async function save(def: ConfigDef) {
+    if (busy[def.key]) return;
     const text = vals[def.key] ?? "";
     const p = parseValue(def, text);
     if (!p.ok) return setSaved((s) => ({ ...s, [def.key]: p.error }));
     if (def.key === "system_enabled" && text === "false" && !window.confirm("Switch the whole system OFF? No emails will be sent and no new rounds opened.")) return;
     if (def.key === "dry_run" && text === "false" && !window.confirm("Turn dry run OFF? Emails will go to the REAL recipients.")) return;
-    const r = await post({ action: "setConfig", key: def.key, value: p.value });
-    setSaved((s) => ({ ...s, [def.key]: r.ok ? "ok" : r.error ?? "Failed" }));
-    if (r.ok) setTimeout(() => window.location.reload(), 600);
+    setBusy((b) => ({ ...b, [def.key]: true }));
+    const res = await postJson("/api/admin", { action: "setConfig", key: def.key, value: p.value });
+    setBusy((b) => ({ ...b, [def.key]: false }));
+    setSaved((s) => ({ ...s, [def.key]: res.ok ? "ok" : (res.error ?? "Failed") }));
+    if (res.ok) router.refresh(); // refreshes the history; what is typed in the other boxes stays
   }
 
   async function addOverride() {
+    if (ovBusy) return;
     setOvMsg(null);
     const def = CONFIG_DEFS.find((d) => d.key === ovKey)!;
     const p = parseValue(def, ovVal);
     if (!ovHub) return setOvMsg("Choose a hub.");
     if (!p.ok) return setOvMsg(p.error);
-    const r = await post({ action: "setConfig", key: ovKey, value: p.value, hubId: ovHub });
-    if (r.ok) window.location.reload();
-    else setOvMsg(r.error ?? "Failed");
+    setOvBusy(true);
+    const res = await postJson("/api/admin", { action: "setConfig", key: ovKey, value: p.value, hubId: ovHub });
+    setOvBusy(false);
+    if (res.ok) {
+      setOvVal("");
+      router.refresh();
+    } else setOvMsg(res.error);
   }
 
   async function clear(o: Override) {
-    const r = await post({ action: "clearOverride", hubId: o.hubId, key: o.key });
-    if (r.ok) window.location.reload();
+    const res = await postJson("/api/admin", { action: "clearOverride", hubId: o.hubId, key: o.key });
+    if (res.ok) router.refresh();
+    else setOvMsg(res.error);
   }
 
   return (
@@ -75,7 +84,7 @@ export default function SettingsForm({ values, hubs, overrides, history }: {
                   {d.help && <div className="small muted" style={{ marginTop: 3 }}>{d.help}</div>}
                 </div>
                 <div>
-                  <button className="btn small" onClick={() => save(d)}>Save</button>
+                  <button className="btn small" disabled={busy[d.key]} onClick={() => save(d)}>{busy[d.key] ? "Saving…" : "Save"}</button>
                 </div>
                 <div className="small" style={{ minWidth: 90 }} aria-live="polite">
                   {saved[d.key] === "ok" ? <span style={{ color: "var(--ok)" }}>✓ Saved</span> : saved[d.key] ? <span style={{ color: "var(--short)" }}>{saved[d.key]}</span> : null}
@@ -107,7 +116,7 @@ export default function SettingsForm({ values, hubs, overrides, history }: {
             <label htmlFor="ovv">Value</label>
             <input id="ovv" type="text" value={ovVal} onChange={(e) => setOvVal(e.target.value)} />
           </div>
-          <button className="btn small" onClick={addOverride}>Add override</button>
+          <button className="btn small" disabled={ovBusy} onClick={addOverride}>{ovBusy ? "Saving…" : "Add override"}</button>
         </div>
         {ovMsg && <div className="msg err">{ovMsg}</div>}
         {overrides.length > 0 && (

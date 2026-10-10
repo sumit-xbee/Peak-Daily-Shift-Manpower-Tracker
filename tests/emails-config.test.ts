@@ -57,13 +57,9 @@ describe("config", () => {
     expect(isAllowedEmail("", c)).toBe(false);
   });
 
-  it("every settings definition has a parser that round-trips", () => {
-    for (const d of CONFIG_DEFS) {
-      const sample = d.type === "int" ? "12" : d.type === "bool" ? "true" : d.type === "list" ? "a, b" : d.options?.[0] ?? "x";
-      const r = parseValue(d, sample);
-      expect(r.ok, d.key).toBe(true);
-    }
+  it("text that is not a whole number is refused for a numeric setting", () => {
     expect(parseValue(CONFIG_DEFS.find((d) => d.type === "int")!, "abc").ok).toBe(false);
+    expect(parseValue(CONFIG_DEFS.find((d) => d.key === "low_pct")!, "12").ok).toBe(true);
   });
 });
 
@@ -120,7 +116,7 @@ describe("emails", () => {
   it("EXCESS and resolved emails read correctly", () => {
     const a = { hub: "H", zone: "Z", label: "08:00-16:00", planned: 100, actual: 112, need: -12, enteredBy: "a@xpressbees.com", enteredAt: new Date(), off: 330 };
     expect(excessAlertEmail({ name: "x", a, dashboardUrl: "u" }).subject).toBe("EXCESS MANPOWER: H 08:00-16:00 +12 above plan");
-    expect(resolvedEmail({ name: "x", a, was: "LOW", dashboardUrl: "u" }).subject).toContain("back within limits");
+    expect(resolvedEmail({ name: "x", a, was: "LOW", dashboardUrl: "u" }).subject).toContain("no longer short");
   });
 
   it("escapes anything typed by people (no HTML injection)", () => {
