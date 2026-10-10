@@ -9,7 +9,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "import:master": "node --env-file-if-exists=.env.local scripts/import-master.mjs"
+    "import:master": "node --env-file-if-exists=.env.local scripts/import-master.mjs",
+    "test:email": "node --env-file-if-exists=.env.local scripts/send-test.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

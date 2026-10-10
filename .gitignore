@@ -11,3 +11,6 @@ coverage/
 *.log
 .claude/
 *.tsbuildinfo
+supabase/.temp/
+.vercel
+.env*
