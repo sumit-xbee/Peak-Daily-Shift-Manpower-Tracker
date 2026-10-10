@@ -80,6 +80,37 @@ export async function loadEntrySummaries(roundIds: string[]): Promise<Map<string
   return map;
 }
 
+/**
+ * All entries of the rounds on the given dates, in ONE query (joined to their round's date).
+ * Far fewer round trips than asking round by round.
+ */
+export async function loadEntrySummariesForDates(dates: string[]): Promise<Map<string, EntrySummary>> {
+  const map = new Map<string, EntrySummary>();
+  const page = 1000;
+  for (let from = 0; ; from += page) {
+    const { data, error } = await db()
+      .from("entries")
+      .select(`${ENTRY_COLS},rounds!inner(round_date)`)
+      .in("rounds.round_date", dates)
+      .order("created_at", { ascending: true })
+      .range(from, from + page - 1);
+    if (error) throw new Error(`load entries by date: ${error.message}`);
+    for (const row of (data ?? []) as (EntryRow & { rounds?: unknown })[]) {
+      const { rounds: _joined, ...e } = row;
+      void _joined;
+      const cur = map.get(e.round_id);
+      if (!cur) map.set(e.round_id, { first: e, latest: e, count: 1, planChanged: e.plan_changed });
+      else {
+        cur.latest = e;
+        cur.count++;
+        cur.planChanged = cur.planChanged || e.plan_changed;
+      }
+    }
+    if (!data || data.length < page) break;
+  }
+  return map;
+}
+
 export function buildViews(
   rounds: RoundRow[],
   entries: Map<string, EntrySummary>,

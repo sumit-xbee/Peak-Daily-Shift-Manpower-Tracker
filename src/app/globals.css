@@ -144,6 +144,19 @@ table.t tr:hover td { background: var(--neutral-bg); }
 .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
 .tip { position: fixed; z-index: 20; pointer-events: none; background: var(--ink); color: var(--bg); padding: 8px 10px; border-radius: 8px; font-size: 13px; max-width: 280px; box-shadow: 0 4px 16px rgba(0,0,0,.25); }
 
+/* loading bar (top of screen) and skeleton blocks */
+.navprogress { position: fixed; top: 0; left: 0; right: 0; height: 4px; z-index: 50; background: transparent; pointer-events: none; }
+.navprogress-bar { height: 100%; background: var(--btn); border-radius: 0 2px 2px 0; box-shadow: 0 0 8px var(--btn); }
+.navprogress-bar.loading { width: 12%; animation: np-grow 12s cubic-bezier(.1, .6, .2, 1) forwards; }
+.navprogress-bar.done { width: 100%; transition: width .2s ease-out, opacity .35s .15s; opacity: 0; }
+@keyframes np-grow { 0% { width: 8%; } 15% { width: 45%; } 50% { width: 75%; } 100% { width: 92%; } }
+.skel { background: linear-gradient(90deg, var(--neutral-bg) 25%, var(--line) 50%, var(--neutral-bg) 75%); background-size: 200% 100%; animation: skel 1.2s linear infinite; border-radius: 6px; }
+@keyframes skel { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .skel { animation: none; }
+  .navprogress-bar.loading { animation: none; width: 60%; }
+}
+
 @media (max-width: 560px) {
   .wrap, .narrow { padding: 12px; }
   .entry .nums { gap: 8px; }

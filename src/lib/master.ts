@@ -1,3 +1,4 @@
+import { cached } from "./cache";
 import { selectAll } from "./db";
 
 export interface Person {
@@ -41,7 +42,11 @@ export interface Master {
 }
 
 /** Load all master data (small: dozens of hubs, a few hundred shifts) in a handful of queries. */
-export async function loadMaster(): Promise<Master> {
+export async function loadMaster(fresh = false): Promise<Master> {
+  return cached("master", 60_000, loadMasterNow, fresh);
+}
+
+async function loadMasterNow(): Promise<Master> {
   const [people, zones, hubs, shifts, globals, skips] = await Promise.all([
     selectAll<Person>("people", "id,name,email"),
     selectAll<{ id: string; name: string; rm_person_id: string; hr_person_id: string }>("zones"),

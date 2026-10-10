@@ -1,7 +1,7 @@
 import { buildConfig, loadOverrides, loadRawConfig, type Config } from "./config";
 import { chunk, db } from "./db";
 import { loadMaster, type Master } from "./master";
-import { buildViews, loadEntrySummaries, loadRoundsForDates, type RoundView } from "./rounds";
+import { buildViews, loadEntrySummariesForDates, loadRoundsForDates, type RoundView } from "./rounds";
 import { addDays, isDateStr, localDateStr } from "./time";
 
 export interface AlertState {
@@ -29,15 +29,34 @@ export const pickDate = (param: string | undefined, today: string) => (param && 
 /** Everything a dashboard page needs for one calendar day (IST). */
 export async function loadDay(dateParam?: string): Promise<DayData> {
   const now = new Date();
-  const raw = await loadRawConfig();
+  const raw = await loadRawConfig(); // cached: usually no database trip at all
   const cfg = buildConfig(raw);
   const today = localDateStr(now, cfg.tzOff);
   const date = pickDate(dateParam, today);
-  const [master, overrides, rounds] = await Promise.all([loadMaster(), loadOverrides(), loadRoundsForDates([date])]);
-  const entries = await loadEntrySummaries(rounds.map((r) => r.id));
+  // everything else is asked for at the same time: one wait instead of four
+  const [master, overrides, rounds, entries, alerts] = await Promise.all([
+    loadMaster(),
+    loadOverrides(),
+    loadRoundsForDates([date]),
+    loadEntrySummariesForDates([date]),
+    loadAlertStatesForDates([date]),
+  ]);
   const views = buildViews(rounds, entries, master, cfg, raw, overrides, now);
-  const alerts = await loadAlertStates(rounds.map((r) => r.id));
   return { date, today, now, cfg, master, views, alerts };
+}
+
+/** Open alerts of the rounds on the given dates, in one query. */
+export async function loadAlertStatesForDates(dates: string[]): Promise<Map<string, AlertState>> {
+  const out = new Map<string, AlertState>();
+  const { data } = await db()
+    .from("alerts")
+    .select("round_id,class,ack_required,acked_by,acked_at,ack_eta,rounds!inner(round_date)")
+    .in("rounds.round_date", dates)
+    .is("resolved_at", null);
+  for (const a of (data ?? []) as unknown as { round_id: string; class: "LOW" | "EXCESS"; ack_required: boolean; acked_by: string | null; acked_at: string | null; ack_eta: string | null }[]) {
+    out.set(a.round_id, { roundId: a.round_id, class: a.class, ackRequired: a.ack_required, ackedBy: a.acked_by, ackedAt: a.acked_at, ackEta: a.ack_eta, resolved: false });
+  }
+  return out;
 }
 
 export async function loadAlertStates(roundIds: string[]): Promise<Map<string, AlertState>> {

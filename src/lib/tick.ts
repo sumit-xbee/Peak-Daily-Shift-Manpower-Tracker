@@ -24,7 +24,7 @@ export interface TickResult {
 type Overrides = Map<string, Record<string, unknown>>;
 
 export async function runTick(now = new Date()): Promise<TickResult> {
-  const raw = await loadRawConfig();
+  const raw = await loadRawConfig(true); // the scheduler never works from cached settings
   const cfg = buildConfig(raw);
   const result: TickResult = { paused: false, roundsCreated: 0, notificationsQueued: 0, alertsChased: 0, digestQueued: 0, outbox: null, at: now.toISOString() };
 
@@ -34,8 +34,7 @@ export async function runTick(now = new Date()): Promise<TickResult> {
     return result;
   }
 
-  const master = await loadMaster();
-  const overrides = await loadOverrides();
+  const [master, overrides] = await Promise.all([loadMaster(true), loadOverrides(true)]);
 
   result.roundsCreated = await ensureRounds(master, cfg, raw, overrides, now);
   const dates = windowDates(cfg, now);

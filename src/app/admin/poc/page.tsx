@@ -8,7 +8,7 @@ import { fmtDateTime } from "@/lib/time";
 export const dynamic = "force-dynamic";
 
 export default async function PocPage() {
-  const [master, cfg] = await Promise.all([loadMaster(), loadConfig()]);
+  const [master, cfg] = await Promise.all([loadMaster(true), loadConfig(true)]);
 
   const shiftCount = new Map<string, number>();
   for (const s of master.shifts.values()) shiftCount.set(s.hub.id, (shiftCount.get(s.hub.id) ?? 0) + 1);

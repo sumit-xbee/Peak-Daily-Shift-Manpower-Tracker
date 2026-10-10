@@ -1,5 +1,6 @@
 import { addSkipDate, bulkAssign, replacePerson, setGlobalContact, setHubActive, setHubPocs, setZoneContacts } from "@/lib/admin";
 import { isAdminEmail, json } from "@/lib/auth";
+import { invalidateCaches } from "@/lib/cache";
 import { clearConfigOverride, setConfigValue } from "@/lib/config";
 import { getSession } from "@/lib/session";
 
@@ -14,6 +15,7 @@ export async function POST(req: Request) {
   if (!b || typeof b.action !== "string") return json({ ok: false, error: "Bad request." }, 400);
 
   try {
+    invalidateCaches(); // an admin change must show up on the very next page load
     switch (b.action) {
       case "setHubPocs": return json(await setHubPocs(s.email, b.hubId, b.pocs ?? []));
       case "replacePerson": return json(await replacePerson(s.email, b));

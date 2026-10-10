@@ -16,20 +16,18 @@ export async function lastPlanHint(hubShiftId: string, beforeDate: string): Prom
 }
 
 export async function toEntryRows(views: RoundView[]): Promise<EntryRowProps[]> {
-  const rows: EntryRowProps[] = [];
-  for (const v of views) {
-    rows.push({
-      roundId: v.round.id,
-      hub: v.shift.hub.name,
-      zone: v.shift.hub.zone.name,
-      label: v.label,
-      cutoffText: fmtDateTime(v.times.cutoffAt, v.cfg.tzOff).split(", ")[1],
-      planned: v.entry ? v.entry.latest.planned : null,
-      actual: v.entry ? v.entry.latest.actual : null,
-      hintPlan: v.entry ? null : await lastPlanHint(v.shift.id, v.round.round_date),
-      thresholds: v.cfg.thresholds,
-      alreadyEntered: Boolean(v.entry),
-    });
-  }
-  return rows;
+  // the "last time" hints are looked up all at once, not one row after another
+  const hints = await Promise.all(views.map((v) => (v.entry ? Promise.resolve(null) : lastPlanHint(v.shift.id, v.round.round_date))));
+  return views.map((v, i) => ({
+    roundId: v.round.id,
+    hub: v.shift.hub.name,
+    zone: v.shift.hub.zone.name,
+    label: v.label,
+    cutoffText: fmtDateTime(v.times.cutoffAt, v.cfg.tzOff).split(", ")[1],
+    planned: v.entry ? v.entry.latest.planned : null,
+    actual: v.entry ? v.entry.latest.actual : null,
+    hintPlan: hints[i],
+    thresholds: v.cfg.thresholds,
+    alreadyEntered: Boolean(v.entry),
+  }));
 }

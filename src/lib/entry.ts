@@ -54,7 +54,7 @@ function toCount(v: unknown): number | null {
 /** Validate and save entries. Every save is a NEW row (history is kept). Alerts are raised or closed as needed. */
 export async function submitEntries(inp: SubmitInput): Promise<SubmitResult> {
   const now = new Date();
-  const raw = await loadRawConfig();
+  const raw = await loadRawConfig(true); // saving numbers decides alerts, so use the latest settings
   const cfg = buildConfig(raw);
   if (!cfg.systemEnabled) return { ok: false, error: "Tracking is paused right now." };
   if (!isAllowedEmail(inp.email, cfg)) return { ok: false, error: `Please enter your XB email (${cfg.allowedDomains.map((d) => "@" + d).join(" or ")}).` };
@@ -62,7 +62,7 @@ export async function submitEntries(inp: SubmitInput): Promise<SubmitResult> {
   if (inp.items.length > 100) return { ok: false, error: "Too many rows in one save." };
 
   const email = inp.email.trim().toLowerCase();
-  const [master, overrides] = await Promise.all([loadMaster(), loadOverrides()]);
+  const [master, overrides] = await Promise.all([loadMaster(true), loadOverrides(true)]);
   const ids = [...new Set(inp.items.map((i) => i.roundId))];
   if (ids.length !== inp.items.length) return { ok: false, error: "A shift appears twice in this save." };
   if (inp.allowedRoundIds && ids.some((id) => !inp.allowedRoundIds!.includes(id))) return { ok: false, error: "This link does not cover one of those shifts." };

@@ -6,6 +6,9 @@ const MAX_AGE_S = 12 * 60 * 60;
 
 export interface Session {
   email: string;
+  /** SYSTEM_ADMIN at the moment of login. Used only to hide menus and to turn away non-admins early.
+   *  Every admin page and every admin action re-checks the database, so this is never the final word. */
+  admin?: boolean;
 }
 
 const key = () => {
@@ -14,8 +17,8 @@ const key = () => {
   return new TextEncoder().encode(s);
 };
 
-export async function signSession(email: string): Promise<string> {
-  return new SignJWT({ email })
+export async function signSession(email: string, admin: boolean): Promise<string> {
+  return new SignJWT({ email, admin })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${MAX_AGE_S}s`)
@@ -26,7 +29,8 @@ export async function verifySession(token: string | undefined): Promise<Session 
   if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, key());
-    return typeof payload.email === "string" ? { email: payload.email } : null;
+    if (typeof payload.email !== "string") return null;
+    return { email: payload.email, admin: typeof payload.admin === "boolean" ? payload.admin : undefined };
   } catch {
     return null;
   }

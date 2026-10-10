@@ -10,13 +10,21 @@ export async function requireSession(): Promise<Session> {
   return s;
 }
 
+/** Is this person a SYSTEM_ADMIN right now? One database query. */
 export async function isAdminEmail(email: string): Promise<boolean> {
-  const p = await db().from("people").select("id").eq("email", email.trim().toLowerCase()).maybeSingle();
-  if (!p.data) return false;
-  const g = await db().from("global_contacts").select("id").eq("role", "SYSTEM_ADMIN").eq("person_id", p.data.id).limit(1);
-  return (g.data?.length ?? 0) > 0;
+  const { data } = await db()
+    .from("global_contacts")
+    .select("id, people!inner(email)")
+    .eq("role", "SYSTEM_ADMIN")
+    .eq("people.email", email.trim().toLowerCase())
+    .limit(1);
+  return (data?.length ?? 0) > 0;
 }
 
+/**
+ * For admin-only pages. Always asks the database (not the login cookie), so removing someone
+ * as SYSTEM_ADMIN takes effect on their very next click. Everyone else is sent to the dashboard.
+ */
 export async function requireAdmin(): Promise<Session> {
   const s = await requireSession();
   if (!(await isAdminEmail(s.email))) redirect("/dashboard");

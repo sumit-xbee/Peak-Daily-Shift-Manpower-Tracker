@@ -1,4 +1,5 @@
 import { DEFAULT_THRESHOLDS, type Thresholds } from "./classify";
+import { cached, invalidateCaches } from "./cache";
 import { db, selectAll } from "./db";
 import type { Offsets } from "./schedule";
 
@@ -79,24 +80,39 @@ export function buildConfig(r: Raw): Config {
   };
 }
 
-export async function loadRawConfig(): Promise<Raw> {
-  const rows = await selectAll<{ key: string; value: unknown }>("app_config", "key,value");
-  return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+/** Settings change rarely, so pages may use a copy up to 20 s old. The scheduler and writers pass fresh = true. */
+export async function loadRawConfig(fresh = false): Promise<Raw> {
+  return cached(
+    "config",
+    20_000,
+    async () => {
+      const rows = await selectAll<{ key: string; value: unknown }>("app_config", "key,value");
+      return Object.fromEntries(rows.map((r) => [r.key, r.value])) as Raw;
+    },
+    fresh,
+  );
 }
 
-export async function loadConfig(): Promise<Config> {
-  return buildConfig(await loadRawConfig());
+export async function loadConfig(fresh = false): Promise<Config> {
+  return buildConfig(await loadRawConfig(fresh));
 }
 
-export async function loadOverrides(): Promise<Map<string, Raw>> {
-  const rows = await selectAll<{ hub_id: string; key: string; value: unknown }>("config_override", "hub_id,key,value");
-  const m = new Map<string, Raw>();
-  for (const r of rows) {
-    const cur = m.get(r.hub_id) ?? {};
-    cur[r.key] = r.value;
-    m.set(r.hub_id, cur);
-  }
-  return m;
+export async function loadOverrides(fresh = false): Promise<Map<string, Raw>> {
+  return cached(
+    "overrides",
+    20_000,
+    async () => {
+      const rows = await selectAll<{ hub_id: string; key: string; value: unknown }>("config_override", "hub_id,key,value");
+      const m = new Map<string, Raw>();
+      for (const r of rows) {
+        const cur = m.get(r.hub_id) ?? {};
+        cur[r.key] = r.value;
+        m.set(r.hub_id, cur);
+      }
+      return m;
+    },
+    fresh,
+  );
 }
 
 /** Global config with one hub's overrides applied (thresholds and time offsets only). */
@@ -113,6 +129,7 @@ export function isAllowedEmail(email: string, cfg: Pick<Config, "allowedDomains"
 }
 
 export async function clearConfigOverride(hubId: string, key: string, by: string) {
+  invalidateCaches();
   const d = db();
   const old = await d.from("config_override").select("value").eq("hub_id", hubId).eq("key", key).maybeSingle();
   await d.from("config_override").delete().eq("hub_id", hubId).eq("key", key);
@@ -120,6 +137,7 @@ export async function clearConfigOverride(hubId: string, key: string, by: string
 }
 
 export async function setConfigValue(key: string, value: unknown, by: string, hubId?: string) {
+  invalidateCaches();
   const d = db();
   if (hubId) {
     const old = await d.from("config_override").select("value").eq("hub_id", hubId).eq("key", key).maybeSingle();

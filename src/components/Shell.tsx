@@ -1,16 +1,11 @@
-import { isAdminEmail, requireSession } from "@/lib/auth";
-import NavBar from "./NavBar";
+import { requireAdmin } from "@/lib/auth";
 
-/** Page frame for logged-in pages: navigation plus content. */
-export default async function Shell({ active, children, adminOnly = false }: { active: string; children: React.ReactNode; adminOnly?: boolean }) {
-  const s = await requireSession();
-  const admin = await isAdminEmail(s.email);
-  return (
-    <>
-      <NavBar email={s.email} isAdmin={admin} active={active} />
-      <main className="wrap">
-        {adminOnly && !admin ? <div className="msg err">This page is for administrators only.</div> : children}
-      </main>
-    </>
-  );
+/**
+ * Wraps a page's content. For admin-only pages it asks the database whether the visitor is a
+ * SYSTEM_ADMIN; anyone else is sent to the dashboard before any admin data is read.
+ * (The navigation bar lives in the section layout, so it does not reload between tabs.)
+ */
+export default async function Shell({ children, adminOnly = false }: { children: React.ReactNode; adminOnly?: boolean; active?: string }) {
+  if (adminOnly) await requireAdmin();
+  return <>{children}</>;
 }

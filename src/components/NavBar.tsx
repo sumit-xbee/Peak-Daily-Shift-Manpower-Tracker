@@ -1,4 +1,8 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import LogoutButton from "./LogoutButton";
 
 const TABS = [
@@ -7,20 +11,27 @@ const TABS = [
   { href: "/dashboard/missing", label: "Enter / missing" },
   { href: "/dashboard/alerts", label: "Alerts" },
 ];
+// Only the System Admin ever sees (or can open) these three.
 const ADMIN_TABS = [
   { href: "/admin/poc", label: "POC directory" },
   { href: "/admin/settings", label: "Settings" },
   { href: "/admin/outbox", label: "Emails" },
 ];
 
-export default function NavBar({ email, isAdmin, active }: { email: string; isAdmin: boolean; active: string }) {
+export default function NavBar({ email, isAdmin }: { email: string; isAdmin: boolean }) {
+  const path = usePathname();
+  // highlight the tab the moment it is clicked, not when the page finally arrives
+  const [pending, setPending] = useState<string | null>(null);
+  useEffect(() => setPending(null), [path]);
+  const current = pending ?? path;
   const tabs = isAdmin ? [...TABS, ...ADMIN_TABS] : TABS;
+
   return (
     <nav className="nav" aria-label="Main">
       <div className="wrap">
         <span className="brand">Peak Shift Tracker</span>
         {tabs.map((t) => (
-          <Link key={t.href} href={t.href} className="tab" aria-current={active === t.href ? "page" : undefined}>
+          <Link key={t.href} href={t.href} className="tab" aria-current={current === t.href ? "page" : undefined} onClick={() => setPending(t.href)}>
             {t.label}
           </Link>
         ))}

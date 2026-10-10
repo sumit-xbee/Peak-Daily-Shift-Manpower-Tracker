@@ -1,4 +1,4 @@
-import { json } from "@/lib/auth";
+import { isAdminEmail, json } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { SESSION_COOKIE, sessionCookieOptions, signSession } from "@/lib/session";
 import { hashToken, safeEqualHex } from "@/lib/tokens";
@@ -28,6 +28,6 @@ export async function POST(req: Request) {
   if (!safeEqualHex(data.code_hash, hashToken(`${email}:${code}`))) return json({ ok: false, error: "Wrong code." }, 400);
 
   await db().from("login_codes").update({ used: true }).eq("id", data.id);
-  (await cookies()).set(SESSION_COOKIE, await signSession(email), sessionCookieOptions);
+  (await cookies()).set(SESSION_COOKIE, await signSession(email, await isAdminEmail(email)), sessionCookieOptions);
   return json({ ok: true });
 }
