@@ -103,13 +103,17 @@ interface Group {
   views: RoundView[];
 }
 
-/** Collect, per person, the rounds they should be told about. One email per person per step per tick. */
-function groupBy(views: RoundView[], roles: (v: RoundView) => string[], master: Master, skip?: (v: RoundView, p: Person) => boolean): Group[] {
+/**
+ * Collect, per person AND per shift start time, the rounds they should be told about.
+ * A person is never sent one email that mixes different start times, and never hears about a
+ * hub they are not a recipient for. Hubs that start at the same time are merged into one email.
+ */
+export function groupBy(views: RoundView[], roles: (v: RoundView) => string[], master: Master, skip?: (v: RoundView, p: Person) => boolean): Group[] {
   const map = new Map<string, Group>();
   for (const v of views) {
     for (const p of recipientsFor(roles(v), v.shift.hub, master)) {
       if (skip?.(v, p)) continue;
-      const k = p.email.toLowerCase();
+      const k = `${p.email.toLowerCase()}|${v.times.shiftStart.getTime()}`;
       const g = map.get(k) ?? { person: p, views: [] };
       g.views.push(v);
       map.set(k, g);
