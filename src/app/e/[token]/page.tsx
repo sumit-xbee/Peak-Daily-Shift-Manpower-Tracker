@@ -1,4 +1,5 @@
 import EntryForm from "@/components/EntryForm";
+import Logo from "@/components/Logo";
 import { resolveLink } from "@/lib/auth";
 import { loadDay, pocNames, sortViews } from "@/lib/dashdata";
 import { REASONS } from "@/lib/entry";
@@ -56,6 +57,9 @@ export default async function EntryPage({ params }: { params: Promise<{ token: s
 
   return (
     <div className="narrow">
+      <div style={{ marginBottom: 14 }}>
+        <Logo height={32} />
+      </div>
       <h1>Enter manpower</h1>
       <p className="muted">
         {link.kind === "delegate" ? "Shared with you by the hub POC. " : person ? `Hi ${person.name}. ` : ""}

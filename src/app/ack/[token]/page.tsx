@@ -1,4 +1,5 @@
 import AckForm from "@/components/AckForm";
+import Logo from "@/components/Logo";
 import { resolveLink } from "@/lib/auth";
 import { loadConfig } from "@/lib/config";
 import { db } from "@/lib/db";
@@ -38,6 +39,9 @@ export default async function AckPage({ params }: { params: Promise<{ token: str
 
   return (
     <div className="narrow">
+      <div style={{ marginBottom: 14 }}>
+        <Logo height={32} />
+      </div>
       <div className="card stack">
         <h1>Low manpower: please acknowledge</h1>
         <p>

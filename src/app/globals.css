@@ -75,7 +75,11 @@ p { margin: 0 0 10px; }
 /* nav */
 .nav { background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
 .nav .wrap { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; padding-top: 10px; padding-bottom: 10px; }
-.nav .brand { font-weight: 700; margin-right: 8px; }
+.nav .brand { font-weight: 700; color: var(--ink); }
+.nav .brandlink { display: inline-flex; align-items: center; gap: 12px; text-decoration: none; margin-right: 8px; }
+.logo { display: inline-flex; align-items: center; background: #ffffff; border-radius: 8px; padding: 4px 10px; line-height: 0; }
+.logo img { display: block; }
+@media (max-width: 700px) { .nav .brand { display: none; } }
 .nav a.tab { text-decoration: none; color: var(--ink2); padding: 6px 10px; border-radius: 8px; }
 .nav a.tab[aria-current="page"] { background: var(--neutral-bg); color: var(--ink); font-weight: 600; }
 .nav .who { margin-left: auto; font-size: 13px; color: var(--muted); display: flex; gap: 10px; align-items: center; }

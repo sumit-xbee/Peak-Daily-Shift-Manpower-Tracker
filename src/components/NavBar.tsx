@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import Logo from "./Logo";
 import LogoutButton from "./LogoutButton";
 
 const TABS = [
@@ -29,7 +30,10 @@ export default function NavBar({ email, isAdmin }: { email: string; isAdmin: boo
   return (
     <nav className="nav" aria-label="Main">
       <div className="wrap">
-        <span className="brand">Peak Shift Tracker</span>
+        <Link href="/dashboard" className="brandlink" aria-label="Xpressbees Peak Shift Tracker, home">
+          <Logo height={30} />
+          <span className="brand">Peak Shift Tracker</span>
+        </Link>
         {tabs.map((t) => (
           <Link key={t.href} href={t.href} className="tab" aria-current={current === t.href ? "page" : undefined} onClick={() => setPending(t.href)}>
             {t.label}
