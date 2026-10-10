@@ -1,0 +1,31 @@
+{
+  "name": "peak-daily-shift-manpower-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Shift-level manpower tracking for hubs: email prompts, one-tap entry link, ad-hoc manpower dashboard and alerts.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "import:master": "node --env-file-if-exists=.env.local scripts/import-master.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/nodemailer": "^8.0.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "exceljs": "^4.4.0",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.3"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.3",
+    "jose": "^6.2.12",
+    "next": "^15.5.27",
+    "nodemailer": "^10.0.16",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  }
+}

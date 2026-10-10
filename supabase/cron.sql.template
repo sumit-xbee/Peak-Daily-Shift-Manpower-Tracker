@@ -1,0 +1,28 @@
+-- Run this ONCE in the Supabase SQL editor AFTER the app is deployed on Vercel.
+-- Replace the two placeholders. Do NOT commit the filled-in version.
+--   <APP_URL>      e.g. https://peak-daily-shift-tracker.vercel.app
+--   <CRON_SECRET>  the same value you set as CRON_SECRET in Vercel
+--
+-- It calls the app every minute. The app does all the work (rounds, emails,
+-- escalations, digest) and is safe to call repeatedly.
+
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+
+select cron.schedule(
+  'peak-tick',
+  '* * * * *',
+  $$
+  select net.http_post(
+    url     := '<APP_URL>/api/tick',
+    headers := jsonb_build_object(
+                 'Content-Type',  'application/json',
+                 'Authorization', 'Bearer <CRON_SECRET>'),
+    body    := '{}'::jsonb,
+    timeout_milliseconds := 55000
+  );
+  $$
+);
+
+-- To STOP everything immediately (level 3 hard stop):
+--   select cron.unschedule('peak-tick');
