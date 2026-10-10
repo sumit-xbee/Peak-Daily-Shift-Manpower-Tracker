@@ -9,7 +9,7 @@ export interface EmailSpec {
   tag: string; // short label in the coloured band, e.g. "ACTION NEEDED"
   heading: string;
   intro?: string;
-  table?: { head: string[]; rows: string[][]; /** optional highlight per row */ rowTones?: ("low" | "excess" | "muted" | "none")[] };
+  table?: { head: string[]; rows: string[][]; /** optional highlight per row */ rowTones?: ("low" | "excess" | "muted" | "none")[]; /** columns that must stay on one line */ nowrapCols?: number[]; /** tighter cells for wide tables */ compact?: boolean };
   strip?: { label: string; value: string }[];
   note?: string;
   button?: { label: string; url: string };
@@ -45,7 +45,7 @@ export function render(subject: string, s: EmailSpec): Rendered {
   const tableHtml = s.table
     ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:16px 0;font-size:14px;">
         <tr>${s.table.head
-          .map((h) => `<th align="left" style="padding:8px 10px;background:#F1F5F9;border-bottom:1px solid #CBD5E1;color:#334155;font-weight:600;">${esc(h)}</th>`)
+          .map((h) => `<th align="left" style="${s.table?.compact ? "padding:7px 6px;font-size:12px;" : "padding:8px 10px;"}background:#F1F5F9;border-bottom:1px solid #CBD5E1;color:#334155;font-weight:600;">${esc(h)}</th>`)
           .join("")}</tr>
         ${s.table.rows
           .map((r, i) => {
@@ -53,7 +53,8 @@ export function render(subject: string, s: EmailSpec): Rendered {
             const bg = tone === "low" ? "background:#FDECEA;" : tone === "excess" ? "background:#E8F1FC;" : "";
             const color = tone === "muted" ? "#64748B" : "#0F172A";
             const weight = tone === "low" ? "font-weight:700;" : "";
-            return `<tr>${r.map((v) => `<td style="padding:8px 10px;border-bottom:1px solid #E2E8F0;color:${color};${bg}${weight}">${esc(v)}</td>`).join("")}</tr>`;
+            const pad = s.table?.compact ? "padding:7px 6px;font-size:13px;" : "padding:8px 10px;";
+            return `<tr>${r.map((v, ci) => `<td style="${pad}border-bottom:1px solid #E2E8F0;color:${color};${bg}${weight}${s.table?.nowrapCols?.includes(ci) ? "white-space:nowrap;" : ""}">${esc(v)}</td>`).join("")}</tr>`;
           })
           .join("")}
       </table>`
@@ -336,12 +337,14 @@ export function poc3ReportEmail(o: {
       { label: "No entry", value: String(t.noEntry) },
     ],
     table: {
-      head: ["#", "Hub", "Shift", "Planned", "Actual", "Needed", "Gap %", "Status"],
+      head: ["#", "Hub", "Shift", "Plan", "Actual", "Need", "Gap %", "Status"],
       rows: o.rows.map((r) => [r.rank === null ? "-" : String(r.rank), r.hub, r.label, r.planned, r.actual, r.need, r.gap, r.status]),
       rowTones: o.rows.map((r) => tone(r.status)),
+      nowrapCols: [0, 2, 3, 4, 5, 6],
+      compact: true,
     },
     note:
-      "Gap % = (Planned - Actual) / Planned. A positive gap means short of plan; negative means above plan. Ad-hoc needed = Planned - Actual." +
+      "Plan = planned manpower, Need = ad-hoc manpower needed (Planned - Actual). Gap % = (Planned - Actual) / Planned: positive means short of plan, negative means above plan." +
       (o.hiddenRows > 0 ? `\n...and ${o.hiddenRows} more shifts that were on plan, on the dashboard.` : ""),
     button: { label: "Open dashboard", url: o.dashboardUrl },
   });

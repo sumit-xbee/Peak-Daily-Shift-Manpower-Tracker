@@ -26,11 +26,12 @@ Stack: **Vercel** (frontend), **Supabase** (Postgres, Auth, RLS, pg_cron), **Git
 | Round | One per hub x shift timing x date. It opens at `shift_start + 30 min` (config). |
 | Planned / Actual | Both entered by the POC. Both are whole-number "Hub Processing" headcount. |
 | **AD-HOC MANPOWER NEEDED** | `Planned - Actual`. Positive means short, and negative means excess. |
-| Classification | **LOW** if ad-hoc needed >= `low_threshold`. **EXCESS** if ad-hoc needed <= `-excess_threshold`. Otherwise **OK**. Boundaries are inclusive. |
+| Classification (management rule, 2026-10-10) | **LOW (ad-hoc manpower needed)** when Actual is **10% or more below** Planned, i.e. Gap % = (Planned - Actual) / Planned >= 10%. **EXCESS** when Actual is 10% or more above Planned. Otherwise **OK**. Boundaries are inclusive. The 10% is a setting (`low_pct`, `excess_pct`); a fixed headcount mode (`threshold_mode = absolute`) is still available, and either can be overridden per hub. |
 | First email goes to | **POC1 and POC2**. Either can submit and the first submission wins. POC3 joins on escalation. |
 | Escalation (T0 = round opens) | T0: POC1+POC2. **T0+60**: reminder to POC1+POC2 and escalate to POC3. T0+120: Zone RM and Ops head. T0+240: MISSED. All offsets are config. |
 | LOW alert | Instant email to **Zone HR (strong), Ops head and Zone RM**. Zone HR must tap **Acknowledge** with an ETA or action. If not acknowledged in 30 min, repeat to Zone HR and escalate to Ops head. (Hub HR is not collected, so alerts go to the hub's Zone HR.) |
-| EXCESS alert | Email to Zone HR. Ops head sees it on the dashboard and in the digest. |
+| EXCESS | **Not emailed to anyone** (management decision). It is shown on the dashboard (EXCESS chip, tiles, chart), on the Alerts page ("shown only, no email sent") and in the daily digest, and the entry form tells the person it is not sent to HR. Controlled by `alert_recipients_excess` (empty). |
+| **Morning report to POC3 (regional managers)** | Every day at **06:00 IST**, each POC3 receives one email about **yesterday** for all hubs under them: the shifts ranked by Gap % against plan, largest first, with the **LOW (ad-hoc) shifts highlighted in red**, plus counts of LOW shifts, people short and shifts with no entry. Sent once a day; if the system was off at 06:00 it goes out when it is back on. Settings: `poc3_report_enabled`, `poc3_report_time_ist`. |
 | Same person in several POC slots | Allowed (e.g. a placeholder during testing). The person gets **one** email per round, not one per slot, and escalation to POC3 adds no extra email if POC3 is the same person. |
 | Edits | Allowed until cut-off, with full history. Entry after cut-off is accepted and flagged "late". |
 
@@ -41,14 +42,16 @@ A `app_config` key-value table holds global defaults, and a `config_override` ta
 | Key | Default |
 |---|---|
 | `system_enabled` | true (the master switch, see 1d) |
-| `low_threshold` / `excess_threshold` | 10 / 10 (headcount) |
-| `threshold_mode` | `absolute` (alternative: `percent`, with `low_pct` / `excess_pct`) |
+| `threshold_mode` | `percent` (alternative: `absolute` headcount) |
+| `low_pct` / `excess_pct` | 10 / 10 (% of planned) |
+| `low_threshold` / `excess_threshold` | 10 / 10 (headcount; used in absolute mode, or when nothing was planned) |
 | `round_open_offset_min` | 30 |
 | `reminder_offset_min` / `l3_escalation_offset_min` | 60 / 60 |
 | `zone_rm_ops_escalation_offset_min` | 120 |
 | `cutoff_offset_min` | 240 |
 | `ack_required_low` / `ack_window_min` | true / 30 |
-| `alert_recipients_by_class` | LOW: Zone HR, Ops head, Zone RM. EXCESS: Zone HR. (A `Hub HR` role can be switched on later without redesign.) |
+| `alert_recipients_low` / `alert_recipients_excess` | LOW: Zone HR, Ops head, Zone RM. EXCESS: nobody (empty). |
+| `poc3_report_enabled` / `poc3_report_time_ist` | true / 06:00 |
 | `status_board_scope` | `zone` (alternatives: `all`, `own`) |
 | `digest_time_ist` | 07:00 |
 | `allowed_email_domains` | `xpressbees.com`, `xpressbees.in` |
@@ -240,7 +243,8 @@ Every email has **one purpose and one button**. They use HTML with inline CSS an
 | Reminder | `REMINDER (60 min): {Hub} {shift} not entered` | Amber band, "still pending since {time}", the same button. |
 | Escalation | `ESCALATION: {Hub} {shift} has no manpower entry` | Red band, who was notified and when, the same button. |
 | LOW alert | `LOW MANPOWER: {Hub} {shift} short by {N}` | Red band. A three-number strip: **Planned / Actual / Short by**. Button **Acknowledge and give ETA**. |
-| EXCESS alert | `EXCESS MANPOWER: {Hub} {shift} +{N} above plan` | Amber band with the same three-number strip and a "redeploy or release" line. |
+| EXCESS alert (switched off) | `EXCESS MANPOWER: {Hub} {shift} +{N} above plan` | Not sent by default. The template exists only in case management later adds recipients in `alert_recipients_excess`. |
+| POC3 morning report | `Yesterday's manpower report {date}: {N} shifts needed ad-hoc manpower` | Red or green band, a three-number strip (LOW shifts / people short / no entry), then one table ranked by Gap %, LOW rows shaded red, EXCESS rows blue, no-entry rows last. |
 | Daily digest | `Daily manpower digest - {date}` | One compact table per zone: missed rounds, LOW and EXCESS hubs, unacknowledged alerts. |
 
 ---
