@@ -29,5 +29,6 @@ export async function toEntryRows(views: RoundView[]): Promise<EntryRowProps[]> 
     hintPlan: hints[i],
     thresholds: v.cfg.thresholds,
     alreadyEntered: Boolean(v.entry),
+    status: v.status,
   }));
 }

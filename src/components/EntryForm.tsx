@@ -14,6 +14,8 @@ export interface EntryRowProps {
   hintPlan: number | null;
   thresholds: Thresholds;
   alreadyEntered: boolean;
+  /** OPEN | OVERDUE | MISSED | SUBMITTED | LATE | NOT_DUE */
+  status: string;
 }
 
 interface Props {
