@@ -1,5 +1,5 @@
 import { applyAlert } from "./alerts";
-import { classify, type ManpowerClass } from "./classify";
+import { classify, gapPercent, type ManpowerClass } from "./classify";
 import { configForHub, isAllowedEmail, loadConfig, loadOverrides, loadRawConfig, buildConfig } from "./config";
 import { db, must } from "./db";
 import { loadMaster } from "./master";
@@ -92,8 +92,10 @@ export async function submitEntries(inp: SubmitInput): Promise<SubmitResult> {
 
     const prev = summaries.get(round.id)?.latest;
     const cls = classify(planned, actual, hubCfg.thresholds);
-    if (cls === "LOW") warnings.push(`${name}: ${planned - actual} short of plan. This will alert HR.`);
-    if (cls === "EXCESS") warnings.push(`${name}: ${actual - planned} above plan. This will alert HR.`);
+    const pct = gapPercent(planned, actual);
+    const pctText = pct === null ? "" : ` (${Math.abs(pct).toFixed(1)}%)`;
+    if (cls === "LOW") warnings.push(`${name}: ${planned - actual} short of plan${pctText}. Ad-hoc manpower is needed and HR will be alerted.`);
+    if (cls === "EXCESS") warnings.push(`${name}: ${actual - planned} above plan${pctText}. It is shown on the dashboard; HR is not emailed for excess.`);
     if (planned === 0) warnings.push(`${name}: Planned is 0.`);
     if (actual === 0) warnings.push(`${name}: Actual is 0.`);
 

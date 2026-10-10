@@ -27,6 +27,9 @@ export interface Config {
   capWarnPct: number;
   sanityMax: number;
   placeholderEmails: string[];
+  /** the morning report to POC3 (regional managers) about yesterday */
+  poc3ReportEnabled: boolean;
+  poc3ReportTimeIst: string;
 }
 
 type Raw = Record<string, unknown>;
@@ -39,7 +42,8 @@ const strArr = (v: unknown, d: string[]) => (Array.isArray(v) ? v.filter((x) => 
 /** Build a typed Config from key/value pairs; every key has a safe default. */
 export function buildConfig(r: Raw): Config {
   const since = typeof r.enabled_since === "string" ? new Date(r.enabled_since) : null;
-  const mode = r.threshold_mode === "percent" ? "percent" : "absolute";
+  // default rule: LOW when actual is 10% or more below planned
+  const mode = r.threshold_mode === "absolute" ? "absolute" : "percent";
   const scope = r.status_board_scope === "all" || r.status_board_scope === "own" ? r.status_board_scope : "zone";
   return {
     systemEnabled: bool(r.system_enabled, true),
@@ -67,7 +71,8 @@ export function buildConfig(r: Raw): Config {
     ackWindowMin: num(r.ack_window_min, 30),
     firstEmailTo: strArr(r.first_email_to, ["POC1", "POC2"]),
     alertRecipientsLow: strArr(r.alert_recipients_low, ["ZONE_HR", "OPS_HEAD", "ZONE_RM"]),
-    alertRecipientsExcess: strArr(r.alert_recipients_excess, ["ZONE_HR"]),
+    // EXCESS is shown on the dashboard but not emailed to anyone (management decision)
+    alertRecipientsExcess: strArr(r.alert_recipients_excess, []),
     statusBoardScope: scope,
     digestTimeIst: str(r.digest_time_ist, "07:00"),
     allowedDomains: strArr(r.allowed_email_domains, ["xpressbees.com", "xpressbees.in"]).map((d) => d.toLowerCase()),
@@ -77,6 +82,8 @@ export function buildConfig(r: Raw): Config {
     capWarnPct: num(r.cap_warn_pct, 80),
     sanityMax: num(r.sanity_max_headcount, 2000),
     placeholderEmails: strArr(r.placeholder_emails, []).map((e) => e.toLowerCase()),
+    poc3ReportEnabled: bool(r.poc3_report_enabled, true),
+    poc3ReportTimeIst: str(r.poc3_report_time_ist, "06:00"),
   };
 }
 

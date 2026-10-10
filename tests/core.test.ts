@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classify, adhocNeeded, DEFAULT_THRESHOLDS, type Thresholds } from "@/lib/classify";
+import { classify, adhocNeeded, gapPercent, DEFAULT_THRESHOLDS, type Thresholds } from "@/lib/classify";
 import { computeRoundTimes, dueSteps, roundStatus, type Offsets } from "@/lib/schedule";
 import { addDays, fmtDateTime, localDateStr, localHM, localToUtc, shiftLabel } from "@/lib/time";
 import { hashToken, newLoginCode, newToken } from "@/lib/tokens";
@@ -12,21 +12,35 @@ describe("classify", () => {
     expect(adhocNeeded(100, 110)).toBe(-10);
   });
 
-  it("LOW at exactly the threshold (inclusive)", () => {
-    expect(classify(100, 90, DEFAULT_THRESHOLDS)).toBe("LOW");
-    expect(classify(100, 91, DEFAULT_THRESHOLDS)).toBe("OK");
+  it("management rule: LOW when actual is 10% or more below planned (default)", () => {
+    expect(DEFAULT_THRESHOLDS.mode).toBe("percent");
+    expect(classify(100, 90, DEFAULT_THRESHOLDS)).toBe("LOW"); // exactly 10% short
+    expect(classify(100, 91, DEFAULT_THRESHOLDS)).toBe("OK"); // 9% short
+    expect(classify(500, 449, DEFAULT_THRESHOLDS)).toBe("LOW"); // 10.2% short
+    expect(classify(500, 451, DEFAULT_THRESHOLDS)).toBe("OK"); // 9.8% short
+    expect(classify(20, 18, DEFAULT_THRESHOLDS)).toBe("LOW"); // a small hub: 2 of 20 is 10%
+    expect(classify(20, 19, DEFAULT_THRESHOLDS)).toBe("OK");
   });
 
-  it("EXCESS at exactly the threshold (inclusive)", () => {
+  it("EXCESS at 10% or more above planned (shown, never emailed)", () => {
     expect(classify(100, 110, DEFAULT_THRESHOLDS)).toBe("EXCESS");
     expect(classify(100, 109, DEFAULT_THRESHOLDS)).toBe("OK");
   });
 
-  it("honours changed config thresholds", () => {
-    const t: Thresholds = { ...DEFAULT_THRESHOLDS, low: 5, excess: 20 };
+  it("gap percent = (planned - actual) / planned", () => {
+    expect(gapPercent(100, 85)).toBeCloseTo(15, 5);
+    expect(gapPercent(200, 230)).toBeCloseTo(-15, 5);
+    expect(gapPercent(50, 50)).toBe(0);
+    expect(gapPercent(0, 7)).toBeNull();
+  });
+
+  it("headcount mode still works and honours changed thresholds", () => {
+    const t: Thresholds = { ...DEFAULT_THRESHOLDS, mode: "absolute", low: 5, excess: 20 };
     expect(classify(50, 45, t)).toBe("LOW");
     expect(classify(50, 65, t)).toBe("OK");
     expect(classify(50, 70, t)).toBe("EXCESS");
+    expect(classify(100, 90, { ...DEFAULT_THRESHOLDS, mode: "absolute" })).toBe("LOW");
+    expect(classify(100, 91, { ...DEFAULT_THRESHOLDS, mode: "absolute" })).toBe("OK");
   });
 
   it("percent mode scales with planned", () => {

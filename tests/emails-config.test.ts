@@ -20,8 +20,11 @@ const master: Master = { people: new Map(), zones: new Map(), hubs: new Map(), s
 describe("config", () => {
   it("falls back to safe defaults for an empty config", () => {
     const c = buildConfig({});
-    expect(c.thresholds.low).toBe(10);
-    expect(c.thresholds.excess).toBe(10);
+    expect(c.thresholds).toMatchObject({ mode: "percent", lowPct: 10, excessPct: 10, low: 10, excess: 10 });
+    expect(c.alertRecipientsExcess).toEqual([]); // excess is never emailed
+    expect(c.alertRecipientsLow).toEqual(["ZONE_HR", "OPS_HEAD", "ZONE_RM"]);
+    expect(c.poc3ReportEnabled).toBe(true);
+    expect(c.poc3ReportTimeIst).toBe("06:00");
     expect(c.offsets).toEqual({ roundOpen: 30, reminder: 60, l3: 60, rmOps: 120, cutoff: 240 });
     expect(c.dryRun).toBe(true); // never emails real people by accident
     expect(c.firstEmailTo).toEqual(["POC1", "POC2"]);
@@ -29,8 +32,8 @@ describe("config", () => {
   });
 
   it("reads changed numbers from the config table", () => {
-    const c = buildConfig({ low_threshold: 5, excess_threshold: 15, cutoff_offset_min: 180, dry_run: false, threshold_mode: "percent", status_board_scope: "all" });
-    expect(c.thresholds).toMatchObject({ low: 5, excess: 15, mode: "percent" });
+    const c = buildConfig({ low_threshold: 5, excess_threshold: 15, cutoff_offset_min: 180, dry_run: false, threshold_mode: "absolute", low_pct: 12, status_board_scope: "all" });
+    expect(c.thresholds).toMatchObject({ low: 5, excess: 15, mode: "absolute", lowPct: 12 });
     expect(c.offsets.cutoff).toBe(180);
     expect(c.dryRun).toBe(false);
     expect(c.statusBoardScope).toBe("all");

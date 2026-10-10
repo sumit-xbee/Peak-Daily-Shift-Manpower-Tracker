@@ -256,7 +256,7 @@ insert into app_config (key, value) values
   ('timezone_offset_min',               '330'::jsonb),
   ('low_threshold',                     '10'::jsonb),
   ('excess_threshold',                  '10'::jsonb),
-  ('threshold_mode',                    '"absolute"'::jsonb),
+  ('threshold_mode',                    '"percent"'::jsonb),
   ('low_pct',                           '10'::jsonb),
   ('excess_pct',                        '10'::jsonb),
   ('round_open_offset_min',             '30'::jsonb),
@@ -269,7 +269,7 @@ insert into app_config (key, value) values
   ('ack_window_min',                    '30'::jsonb),
   ('first_email_to',                    '["POC1","POC2"]'::jsonb),
   ('alert_recipients_low',              '["ZONE_HR","OPS_HEAD","ZONE_RM"]'::jsonb),
-  ('alert_recipients_excess',           '["ZONE_HR"]'::jsonb),
+  ('alert_recipients_excess',           '[]'::jsonb),
   ('status_board_scope',                '"zone"'::jsonb),
   ('digest_time_ist',                   '"07:00"'::jsonb),
   ('allowed_email_domains',             '["xpressbees.com","xpressbees.in"]'::jsonb),
@@ -278,5 +278,7 @@ insert into app_config (key, value) values
   ('daily_send_cap',                    '1500'::jsonb),
   ('cap_warn_pct',                      '80'::jsonb),
   ('sanity_max_headcount',              '2000'::jsonb),
-  ('placeholder_emails',                '[]'::jsonb)
+  ('placeholder_emails',                '[]'::jsonb),
+  ('poc3_report_enabled',               'true'::jsonb),
+  ('poc3_report_time_ist',              '"06:00"'::jsonb)
 on conflict (key) do nothing;

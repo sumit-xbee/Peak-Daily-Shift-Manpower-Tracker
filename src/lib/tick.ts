@@ -3,10 +3,11 @@
 import { chaseUnacknowledged } from "./alerts";
 import { buildConfig, configForHub, loadOverrides, loadRawConfig, type Config } from "./config";
 import { chunk, db, selectAll } from "./db";
-import { digestEmail, escalationEmail, openEmail, overdueNoticeEmail, reminderEmail, systemNoticeEmail, type DigestZone, type RoundInfo } from "./emails";
+import { digestEmail, escalationEmail, openEmail, overdueNoticeEmail, poc3ReportEmail, reminderEmail, systemNoticeEmail, type DigestZone, type RoundInfo } from "./emails";
 import { isSkipped, loadMaster, recipientsFor, type Master, type Person } from "./master";
 import { createLink, dashboardUrl, enqueue, entryUrl, groupId, notifyAdmins } from "./notify";
 import { processOutbox, yesterdayOf, type OutboxResult } from "./outbox";
+import { emailRows, loadPoc3Reports } from "./poc3report";
 import { buildViews, loadEntrySummaries, loadRoundsByIds, loadRoundsForDates, type RoundView } from "./rounds";
 import { computeRoundTimes, dueSteps, timesFromRound, type Step } from "./schedule";
 import { addDays, addMinutes, localDateStr, localHM } from "./time";
@@ -17,6 +18,7 @@ export interface TickResult {
   notificationsQueued: number;
   alertsChased: number;
   digestQueued: number;
+  poc3ReportQueued: number;
   outbox: OutboxResult | null;
   at: string;
 }
@@ -26,7 +28,7 @@ type Overrides = Map<string, Record<string, unknown>>;
 export async function runTick(now = new Date()): Promise<TickResult> {
   const raw = await loadRawConfig(true); // the scheduler never works from cached settings
   const cfg = buildConfig(raw);
-  const result: TickResult = { paused: false, roundsCreated: 0, notificationsQueued: 0, alertsChased: 0, digestQueued: 0, outbox: null, at: now.toISOString() };
+  const result: TickResult = { paused: false, roundsCreated: 0, notificationsQueued: 0, alertsChased: 0, digestQueued: 0, poc3ReportQueued: 0, outbox: null, at: now.toISOString() };
 
   await db().from("heartbeat").upsert({ id: 1, last_tick: now.toISOString(), info: { enabled: cfg.systemEnabled, dryRun: cfg.dryRun } });
   if (!cfg.systemEnabled) {
@@ -52,6 +54,7 @@ export async function runTick(now = new Date()): Promise<TickResult> {
     };
   });
   result.digestQueued = await maybeDigest(master, cfg, raw, overrides, now);
+  result.poc3ReportQueued = await maybePoc3Report(cfg, raw, now);
 
   result.outbox = await processOutbox(cfg, now);
   await adminWatch(master, cfg, now, result.outbox);
@@ -249,6 +252,33 @@ async function maybeDigest(master: Master, cfg: Config, raw: Record<string, unkn
     const m = digestEmail({ name: z.rm.name, date, zones: [zd], dashboardUrl: base });
     if (await enqueue({ ...m, dedupeKey: `digest:${today}:${z.rm.email.toLowerCase()}`, kind: "digest", toName: z.rm.name, toEmail: z.rm.email })) queued++;
   }
+  return queued;
+}
+
+// ---------------------------------------------------------------- 3b. 6 AM report to POC3 (regional managers)
+/**
+ * Every morning at `poc3_report_time_ist` (default 06:00 IST): each POC3 gets yesterday's shifts for
+ * the hubs under them, ranked by gap % against plan, with ad-hoc (LOW) shifts highlighted.
+ * Sent once per day; if the system was off at 06:00 it goes out as soon as it is back on.
+ */
+async function maybePoc3Report(cfg: Config, raw: Record<string, unknown>, now: Date): Promise<number> {
+  if (!cfg.poc3ReportEnabled) return 0;
+  const [hh, mm] = cfg.poc3ReportTimeIst.split(":").map(Number);
+  const [nh, nm] = localHM(now, cfg.tzOff).split(":").map(Number);
+  if (nh * 60 + nm < hh * 60 + mm) return 0;
+
+  const today = localDateStr(now, cfg.tzOff);
+  if (raw.poc3_report_last_date === today) return 0; // already done today
+
+  const date = addDays(today, -1);
+  const { reports } = await loadPoc3Reports(date, now);
+  let queued = 0;
+  for (const r of reports) {
+    const { rows, hidden } = emailRows(r.rows);
+    const m = poc3ReportEmail({ name: r.person.name, date, hubCount: r.hubCount, totals: r.totals, rows, hiddenRows: hidden, dashboardUrl: dashboardUrl(cfg) });
+    if (await enqueue({ ...m, dedupeKey: `poc3report:${today}:${r.person.email.toLowerCase()}`, kind: "poc3_report", toName: r.person.name, toEmail: r.person.email })) queued++;
+  }
+  await db().from("app_config").upsert({ key: "poc3_report_last_date", value: today, updated_at: now.toISOString(), updated_by: "scheduler" });
   return queued;
 }
 

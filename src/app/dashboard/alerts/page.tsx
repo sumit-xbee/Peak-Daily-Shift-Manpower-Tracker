@@ -28,7 +28,7 @@ export default async function AlertsPage() {
   return (
     <Shell active="/dashboard/alerts">
       <h1>Alerts</h1>
-      <p className="muted">Last 7 days. {open.length} open. LOW alerts need the Zone HR to acknowledge.</p>
+      <p className="muted">Last 7 days. {open.length} open. LOW alerts (ad-hoc manpower needed) email HR and need the Zone HR to acknowledge. EXCESS is listed here for visibility only; nobody is emailed for it.</p>
       <section className="card">
         <div className="tablewrap">
           <table className="t">
@@ -49,7 +49,8 @@ export default async function AlertsPage() {
                     <td><ClassChip cls={a.class} /></td>
                     <td className="r num"><strong>{a.adhoc_needed > 0 ? `+${a.adhoc_needed}` : a.adhoc_needed}</strong></td>
                     <td className="small">
-                      {a.class !== "LOW" || !a.ack_required ? <span className="muted">not required</span>
+                      {a.class === "EXCESS" ? <span className="muted">shown only, no email sent</span>
+                        : !a.ack_required ? <span className="muted">not required</span>
                         : a.acked_at ? <span className="chip okc">✓ {a.acked_by}</span>
                         : a.resolved_at ? <span className="muted">resolved</span>
                         : <span className="chip low">! Not acknowledged{a.repeat_count ? ` (chased ${a.repeat_count}×)` : ""}</span>}

@@ -4,6 +4,8 @@ import DivergingBars, { type BarRow } from "@/components/DivergingBars";
 import Shell from "@/components/Shell";
 import StatTile from "@/components/StatTile";
 import { loadCompare, loadDay, nextDay, pocNames, prevDay, sortViews, totals } from "@/lib/dashdata";
+import { gapPercent } from "@/lib/classify";
+import { fmtPct } from "@/lib/report";
 import { fmtDateTime } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
@@ -18,10 +20,11 @@ export default async function HubView({ searchParams }: { searchParams: Promise<
   const p = cmp ? totals(cmp.views.filter((v) => !zone || v.shift.hub.zone.name === zone)) : null; // the same zone filter, for the day before
   const off = day.cfg.tzOff;
 
-  // chart: the largest gaps first, entered rows only
+  // chart: the largest gaps against plan first (by %), entered rows only
   const entered = views.filter((v) => v.entry);
+  const gapOf = (v: (typeof entered)[number]) => Math.abs(gapPercent(v.entry!.latest.planned, v.entry!.latest.actual) ?? 0);
   const chartRows: BarRow[] = [...entered]
-    .sort((a, b) => Math.abs(b.entry!.latest.adhoc_needed) - Math.abs(a.entry!.latest.adhoc_needed))
+    .sort((a, b) => gapOf(b) - gapOf(a) || Math.abs(b.entry!.latest.adhoc_needed) - Math.abs(a.entry!.latest.adhoc_needed))
     .slice(0, 25)
     .map((v) => {
       const n = v.entry!.latest.adhoc_needed;
@@ -29,14 +32,19 @@ export default async function HubView({ searchParams }: { searchParams: Promise<
         label: `${v.shift.hub.name} ${v.label}`,
         short: n > 0 ? n : 0,
         excess: n < 0 ? -n : 0,
-        detail: `Planned ${v.entry!.latest.planned}, Actual ${v.entry!.latest.actual}`,
+        detail: `Planned ${v.entry!.latest.planned}, Actual ${v.entry!.latest.actual}, gap ${fmtPct(gapPercent(v.entry!.latest.planned, v.entry!.latest.actual))}`,
       };
     });
 
   return (
     <Shell active="/dashboard">
       <h1>Hub view</h1>
-      <p className="muted">Ad-hoc manpower needed = Planned − Actual (Hub Processing). Positive means more people are needed.</p>
+      <p className="muted">
+        Ad-hoc manpower needed = Planned − Actual (Hub Processing). Positive means more people are needed.{" "}
+        {day.cfg.thresholds.mode === "percent"
+          ? `LOW = actual is ${day.cfg.thresholds.lowPct}% or more below planned (HR is alerted). EXCESS = ${day.cfg.thresholds.excessPct}% or more above planned (shown here only, no email).`
+          : `LOW = short by ${day.cfg.thresholds.low} or more (HR is alerted). EXCESS = ${day.cfg.thresholds.excess} or more above plan (shown here only, no email).`}
+      </p>
       <DashControls path="/dashboard" date={day.date} today={day.today} zone={zone} zones={zones} prev={prevDay(day.date)} next={nextDay(day.date)} />
 
       <div className="tiles">
@@ -54,7 +62,7 @@ export default async function HubView({ searchParams }: { searchParams: Promise<
       </p>
 
       <section className="card" aria-labelledby="chart-h">
-        <h2 id="chart-h">Largest gaps {entered.length > 25 ? `(top 25 of ${entered.length})` : ""}</h2>
+        <h2 id="chart-h">Largest gaps vs plan {entered.length > 25 ? `(top 25 of ${entered.length})` : ""}</h2>
         <DivergingBars rows={chartRows} limit={day.cfg.thresholds.mode === "absolute" ? Math.max(day.cfg.thresholds.low, day.cfg.thresholds.excess) : undefined} />
       </section>
 
@@ -69,7 +77,7 @@ export default async function HubView({ searchParams }: { searchParams: Promise<
                 <tr>
                   <th>Hub</th><th>Zone</th><th>Shift</th><th>POCs</th>
                   <th className="r">Planned – Hub Processing</th><th className="r">Actual – Hub Processing</th>
-                  <th className="r">AD-HOC MANPOWER NEEDED</th><th>Level</th><th>Entry</th><th>Entered by</th><th>Alert</th>
+                  <th className="r">AD-HOC MANPOWER NEEDED</th><th className="r">Gap vs plan</th><th>Level</th><th>Entry</th><th>Entered by</th><th>Alert</th>
                 </tr>
               </thead>
               <tbody>
@@ -85,6 +93,7 @@ export default async function HubView({ searchParams }: { searchParams: Promise<
                       <td className="r num">{e ? e.planned : "–"}</td>
                       <td className="r num">{e ? e.actual : "–"}</td>
                       <td className="r"><AdhocValue value={e ? e.adhoc_needed : null} /></td>
+                      <td className="r num">{e ? fmtPct(gapPercent(e.planned, e.actual)) : "–"}</td>
                       <td><ClassChip cls={v.cls} /></td>
                       <td><StatusChip status={v.status} /></td>
                       <td className="small">
@@ -97,6 +106,7 @@ export default async function HubView({ searchParams }: { searchParams: Promise<
                       </td>
                       <td className="small">
                         {al?.class === "LOW" ? (al.ackedAt ? <span className="chip okc">✓ Acknowledged{al.ackEta ? `: ${al.ackEta}` : ""}</span> : al.ackRequired ? <span className="chip low">! Not acknowledged</span> : null) : null}
+                        {al?.class === "EXCESS" ? <span className="muted">shown only, no email</span> : null}
                       </td>
                     </tr>
                   );
